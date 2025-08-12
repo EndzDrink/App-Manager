@@ -52,6 +52,31 @@ export default {
 					DEFAULT: 'hsl(var(--card))',
 					foreground: 'hsl(var(--card-foreground))'
 				},
+				success: {
+					DEFAULT: 'hsl(var(--success))',
+					foreground: 'hsl(var(--success-foreground))'
+				},
+				// AppManager custom colors
+				dashboard: {
+					bg: 'hsl(var(--dashboard-bg))'
+				},
+				metric: {
+					card: 'hsl(var(--metric-card))',
+					value: 'hsl(var(--metric-value))',
+					label: 'hsl(var(--metric-label))'
+				},
+				progress: {
+					bg: 'hsl(var(--progress-bg))',
+					fill: 'hsl(var(--progress-fill))'
+				},
+				nav: {
+					active: 'hsl(var(--nav-active))',
+					inactive: 'hsl(var(--nav-inactive))'
+				},
+				chart: {
+					primary: 'hsl(var(--chart-primary))',
+					secondary: 'hsl(var(--chart-secondary))'
+				},
 				sidebar: {
 					DEFAULT: 'hsl(var(--sidebar-background))',
 					foreground: 'hsl(var(--sidebar-foreground))',

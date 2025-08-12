@@ -2,13 +2,13 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
+/* AppManager Design System - All colors, gradients, fonts, etc defined here. 
 All colors MUST be HSL.
 */
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
+    --background: 240 10% 98%;
     --foreground: 222.2 84% 4.9%;
 
     --card: 0 0% 100%;
@@ -17,7 +17,7 @@ All colors MUST be HSL.
     --popover: 0 0% 100%;
     --popover-foreground: 222.2 84% 4.9%;
 
-    --primary: 222.2 47.4% 11.2%;
+    --primary: 222.2 84% 4.9%;
     --primary-foreground: 210 40% 98%;
 
     --secondary: 210 40% 96.1%;
@@ -29,12 +29,27 @@ All colors MUST be HSL.
     --accent: 210 40% 96.1%;
     --accent-foreground: 222.2 47.4% 11.2%;
 
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
+
     --destructive: 0 84.2% 60.2%;
     --destructive-foreground: 210 40% 98%;
 
     --border: 214.3 31.8% 91.4%;
     --input: 214.3 31.8% 91.4%;
     --ring: 222.2 84% 4.9%;
+
+    /* Custom AppManager tokens */
+    --dashboard-bg: 240 10% 98%;
+    --metric-card: 0 0% 100%;
+    --metric-value: 222.2 84% 4.9%;
+    --metric-label: 215.4 16.3% 46.9%;
+    --progress-bg: 210 40% 96.1%;
+    --progress-fill: 222.2 84% 4.9%;
+    --nav-active: 222.2 84% 4.9%;
+    --nav-inactive: 215.4 16.3% 46.9%;
+    --chart-primary: 222.2 84% 4.9%;
+    --chart-secondary: 210 40% 90%;
 
     --radius: 0.5rem;
 
