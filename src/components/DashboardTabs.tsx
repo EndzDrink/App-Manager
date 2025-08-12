@@ -8,16 +8,19 @@ const tabs = [
   { id: "admin", label: "Admin" },
 ];
 
-export const DashboardTabs = () => {
-  const [activeTab, setActiveTab] = useState("dashboard");
+interface DashboardTabsProps {
+  activeTab: string;
+  onTabChange: (tabId: string) => void;
+}
 
+export const DashboardTabs = ({ activeTab, onTabChange }: DashboardTabsProps) => {
   return (
     <div className="border-b border-border mb-8">
       <nav className="flex space-x-8">
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
+            onClick={() => onTabChange(tab.id)}
             className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
               activeTab === tab.id
                 ? "border-nav-active text-nav-active"
