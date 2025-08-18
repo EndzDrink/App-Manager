@@ -15,17 +15,22 @@ interface DashboardTabsProps {
 
 export const DashboardTabs = ({ activeTab, onTabChange }: DashboardTabsProps) => {
   return (
-    <div className="border-b border-border mb-8">
-      <nav className="flex space-x-8">
+    // The container no longer has a bottom border
+    <div className="mb-8">
+      <nav className="flex space-x-3">
         {tabs.map((tab) => (
           <button
             key={tab.id}
             onClick={() => onTabChange(tab.id)}
-            className={`py-3 px-1 border-b-2 font-medium text-sm transition-colors ${
-              activeTab === tab.id
-                ? "border-nav-active text-nav-active"
-                : "border-transparent text-nav-inactive hover:text-nav-active"
-            }`}
+            // Conditional classes for active and inactive tabs
+            className={`
+              py-2 px-6 rounded-full font-medium text-sm transition-colors duration-200
+              ${
+                activeTab === tab.id
+                  ? "bg-white text-gray-900 border border-gray-300 shadow-sm" // Active state styling
+                  : "text-gray-500 hover:text-gray-900" // Inactive state styling
+              }
+            `}
           >
             {tab.label}
           </button>
@@ -34,3 +39,4 @@ export const DashboardTabs = ({ activeTab, onTabChange }: DashboardTabsProps) =>
     </div>
   );
 };
+export default DashboardTabs;

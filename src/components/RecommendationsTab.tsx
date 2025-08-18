@@ -16,7 +16,7 @@ const recommendations = [
     id: 2,
     type: "cancel",
     title: "Cancel Subscription: Gym Membership App",
-    description: "No usage detected. Save $29.99/month. Potential yearly savings: $359.88",
+    description: "No usage detected. Save ZAR 29.99/month. Potential yearly savings: $359.88",
     confidence: "95% confidence",
     action: "Cancel",
     actionColor: "bg-red-500 hover:bg-red-600 text-white"

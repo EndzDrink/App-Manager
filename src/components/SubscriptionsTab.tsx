@@ -1,56 +1,18 @@
+import React from 'react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, ExternalLink, X } from "lucide-react";
+import { ExternalLink, X } from "lucide-react";
+import AddSubscriptionCard from './AddSubscriptionCard'; // Import the new card component
 
-const subscriptions = [
-  {
-    id: 1,
-    name: "Netflix",
-    category: "Entertainment",
-    icon: "🎬",
-    price: "$15.99",
-    billing: "Aug 19, 2025",
-    usage: "High Usage",
-    usageColor: "bg-green-500",
-    color: "bg-red-500"
-  },
-  {
-    id: 2,
-    name: "Adobe Creative Cloud",
-    category: "Productivity",
-    icon: "🎨",
-    price: "$52.99",
-    billing: "Aug 15, 2025",
-    usage: "Medium Usage",
-    usageColor: "bg-yellow-500",
-    color: "bg-blue-500"
-  },
-  {
-    id: 3,
-    name: "Spotify Premium",
-    category: "Entertainment",
-    icon: "🎵",
-    price: "$9.99",
-    billing: "Aug 27, 2025",
-    usage: "High Usage",
-    usageColor: "bg-green-500",
-    color: "bg-green-500"
-  },
-  {
-    id: 4,
-    name: "Gym Membership App",
-    category: "Health",
-    icon: "💪",
-    price: "$29.99",
-    billing: "Aug 12, 2025",
-    usage: "Never Usage",
-    usageColor: "bg-red-500",
-    color: "bg-orange-500"
-  }
-];
+// Props interface for SubscriptionsTab
+interface SubscriptionsTabProps {
+  subscriptions: any[]; // The list of subscriptions
+  onAddSubscription: () => void; // Function to add a new subscription
+}
 
-export const SubscriptionsTab = () => {
+// The SubscriptionsTab component displays a list of subscriptions.
+export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscriptions, onAddSubscription }) => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -58,10 +20,6 @@ export const SubscriptionsTab = () => {
           <h2 className="text-xl font-semibold text-metric-value">Active Subscriptions</h2>
           <p className="text-sm text-metric-label">Track your recurring subscriptions and costs</p>
         </div>
-        <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
-          <Plus className="h-4 w-4 mr-2" />
-          Add Subscription
-        </Button>
       </div>
       
       <div className="space-y-4">
@@ -109,7 +67,11 @@ export const SubscriptionsTab = () => {
             </div>
           </Card>
         ))}
+        {/* Render the AddSubscriptionCard component here */}
+        <AddSubscriptionCard onClick={onAddSubscription} />
       </div>
     </div>
   );
 };
+
+export default SubscriptionsTab;

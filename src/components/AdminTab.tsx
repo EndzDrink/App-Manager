@@ -65,7 +65,7 @@ export const AdminTab = () => {
           </Card>
           
           <Card className="p-6 bg-orange-50 border border-orange-200 shadow-sm text-center">
-            <div className="text-4xl font-bold text-orange-600 mb-2">$109</div>
+            <div className="text-4xl font-bold text-orange-600 mb-2">ZAR 109</div>
             <div className="text-sm font-medium text-orange-800">Monthly Cost</div>
           </Card>
         </div>

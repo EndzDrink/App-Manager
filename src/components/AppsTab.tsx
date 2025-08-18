@@ -1,61 +1,17 @@
+import React from 'react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Plus, ExternalLink, Trash2 } from "lucide-react";
+import AddAppCard from './AddAppCard';
 
-const apps = [
-  {
-    id: 1,
-    name: "Netflix",
-    category: "Entertainment",
-    icon: "🎬",
-    dailyUsage: "2h 0m",
-    size: "250.5 MB",
-    lastUsed: "Aug 7, 2025",
-    color: "bg-red-500"
-  },
-  {
-    id: 2,
-    name: "Adobe Photoshop",
-    category: "Productivity",
-    icon: "🎨",
-    dailyUsage: "45m",
-    size: "1200 MB",
-    lastUsed: "Aug 6, 2025",
-    color: "bg-blue-500"
-  },
-  {
-    id: 3,
-    name: "Candy Crush",
-    category: "Games",
-    icon: "🍭",
-    dailyUsage: "5m",
-    size: "89.2 MB",
-    lastUsed: "Jul 23, 2025",
-    color: "bg-pink-500"
-  },
-  {
-    id: 4,
-    name: "Slack",
-    category: "Communication",
-    icon: "💬",
-    dailyUsage: "3h 0m",
-    size: "156.8 MB",
-    lastUsed: "Aug 7, 2025",
-    color: "bg-purple-500"
-  },
-  {
-    id: 5,
-    name: "Unused Calculator Pro",
-    category: "Utilities",
-    icon: "🧮",
-    dailyUsage: "0m",
-    size: "12.3 MB",
-    lastUsed: "Jun 23, 2025",
-    color: "bg-gray-400"
-  }
-];
+// Props interface for AppsTab
+interface AppsTabProps {
+  apps: any[]; // The list of applications
+  onAddApp: () => void; // Function to add a new app
+}
 
-export const AppsTab = () => {
+// The AppsTab component displays a list of applications.
+export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -63,10 +19,6 @@ export const AppsTab = () => {
           <h2 className="text-xl font-semibold text-metric-value">Your Apps</h2>
           <p className="text-sm text-metric-label">Manage and track your installed applications</p>
         </div>
-        <Button className="bg-primary hover:bg-primary/90 text-primary-foreground">
-          <Plus className="h-4 w-4 mr-2" />
-          Add App
-        </Button>
       </div>
       
       <div className="space-y-4">
@@ -113,7 +65,11 @@ export const AppsTab = () => {
             </div>
           </Card>
         ))}
+        {/* Render the AddAppCard component here */}
+        <AddAppCard onClick={onAddApp} />
       </div>
     </div>
   );
 };
+
+export default AppsTab;
