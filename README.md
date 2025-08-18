@@ -1,73 +1,58 @@
-# Welcome to your Lovable project
+App Manager
+App Manager is a powerful and intuitive application designed to help you organize and manage your various software applications efficiently. Built with modern web technologies, it provides a clean, responsive interface to streamline your workflow.
 
-## Project info
+Features
+User-Friendly Interface: A clean and modern UI built with Tailwind CSS.
 
-**URL**: https://lovable.dev/projects/b0e3ef6c-2ee8-4e7d-a3b4-5cad4b3941e3
+Responsive Design: Works flawlessly on both desktop and mobile devices.
 
-## How can I edit this code?
+Fast Performance: Powered by React and Vite for a snappy user experience.
 
-There are several ways of editing your application.
+Coming Soon: Stay tuned for new features like application categorization, search functionality, and more!
 
-**Use Lovable**
+Technologies Used
+React: A JavaScript library for building user interfaces.
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/b0e3ef6c-2ee8-4e7d-a3b4-5cad4b3941e3) and start prompting.
+Vite: A fast, next-generation frontend tooling.
 
-Changes made via Lovable will be committed automatically to this repo.
+Tailwind CSS: A utility-first CSS framework for rapid UI development.
 
-**Use your preferred IDE**
+Getting Started
+Follow these steps to get the App Manager running locally on your machine.
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+Prerequisites
+Node.js (LTS version recommended)
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+npm or yarn
 
-Follow these steps:
+Installation
+Clone the repository:
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+git clone https://github.com/EndzDrink/App-Manager.git
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+Navigate to the project directory:
 
-# Step 3: Install the necessary dependencies.
-npm i
+cd App-Manager
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
+Install the dependencies:
+
+npm install
+# or
+yarn
+
+Running the App
+Start the development server:
+
 npm run dev
-```
+# or
+yarn dev
 
-**Edit a file directly in GitHub**
+Open your browser and visit http://localhost:5173 (or the port specified in your terminal) to view the application.
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+Contribution
+Contributions are welcome! If you have suggestions for new features, improvements, or bug fixes, feel free to open an issue or submit a pull request.
 
-**Use GitHub Codespaces**
+License
+This project is licensed under the MIT License. See the LICENSE file for more details.
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
-
-## What technologies are used for this project?
-
-This project is built with:
-
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
-
-## How can I deploy this project?
-
-Simply open [Lovable](https://lovable.dev/projects/b0e3ef6c-2ee8-4e7d-a3b4-5cad4b3941e3) and click on Share -> Publish.
-
-## Can I connect a custom domain to my Lovable project?
-
-Yes, you can!
-
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
-
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+Made with ❤️ by Andy Mthembu
