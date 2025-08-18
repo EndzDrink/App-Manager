@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ExternalLink, X } from "lucide-react";
-import AddSubscriptionCard from './AddSubscriptionCard'; // Import the new card component
+import AddSubscriptionCard from './AddSubscriptionCard'; 
 
 // Props interface for SubscriptionsTab
 interface SubscriptionsTabProps {
