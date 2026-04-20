@@ -5,7 +5,6 @@ import { Download, RotateCcw, RefreshCw, Settings } from "lucide-react";
 export const AdminTab = () => {
   return (
     <div className="space-y-8">
-      {/* Data Management Section */}
       <div>
         <div className="flex items-center space-x-3 mb-6">
           <Settings className="h-5 w-5 text-metric-label" />

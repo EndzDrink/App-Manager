@@ -4,13 +4,11 @@ import { Button } from "@/components/ui/button";
 import { Plus, ExternalLink, Trash2 } from "lucide-react";
 import AddAppCard from './AddAppCard';
 
-// Props interface for AppsTab
 interface AppsTabProps {
-  apps: any[]; // The list of applications
-  onAddApp: () => void; // Function to add a new app
+  apps: any[]; 
+  onAddApp: () => void; 
 }
 
-// The AppsTab component displays a list of applications.
 export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
   return (
     <div className="space-y-6">
@@ -65,7 +63,6 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
             </div>
           </Card>
         ))}
-        {/* Render the AddAppCard component here */}
         <AddAppCard onClick={onAddApp} />
       </div>
     </div>

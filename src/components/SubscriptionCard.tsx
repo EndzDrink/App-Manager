@@ -2,15 +2,12 @@ import React from 'react';
 import { Card } from "@/components/ui/card";
 import { DollarSign } from "lucide-react";
 
-// Define the props for the SubscriptionCard component
 interface SubscriptionCardProps {
   subscriptionName: string;
   cost: number;
   renewalDate: string;
 }
 
-// The SubscriptionCard component displays details for a single subscription.
-// It uses a clean, card-like design with Tailwind CSS.
 const SubscriptionCard: React.FC<SubscriptionCardProps> = ({
   subscriptionName,
   cost,

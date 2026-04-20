@@ -9,13 +9,10 @@ interface AppCardProps {
   status: 'active' | 'inactive';
 }
 
-// The AppCard component displays details for a single application.
-// It uses Tailwind CSS for styling to match the dashboard's design.
 const AppCard: React.FC<AppCardProps> = ({ appName, description, status }) => {
   return (
     <Card className="p-6 flex flex-col space-y-4">
       <div className="flex items-center space-x-4">
-        {/* App icon container */}
         <div className="w-12 h-12 bg-gray-100 rounded-full flex items-center justify-center text-gray-500">
           <Monitor className="h-6 w-6" />
         </div>

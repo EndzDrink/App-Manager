@@ -2,9 +2,6 @@
 @tailwind components;
 @tailwind utilities;
 
-/* AppManager Design System - All colors, gradients, fonts, etc defined here. 
-All colors MUST be HSL.
-*/
 
 @layer base {
   :root {

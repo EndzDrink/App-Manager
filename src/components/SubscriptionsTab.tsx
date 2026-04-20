@@ -67,7 +67,6 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
             </div>
           </Card>
         ))}
-        {/* Render the AddSubscriptionCard component here */}
         <AddSubscriptionCard onClick={onAddSubscription} />
       </div>
     </div>

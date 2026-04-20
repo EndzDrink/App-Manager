@@ -1,13 +1,11 @@
 import React from 'react';
 import { Plus } from 'lucide-react';
-import { Card } from "@/components/ui/card"; // Import the Card component
+import { Card } from "@/components/ui/card"; 
 
-// Define the props for the AddSubscriptionCard component
 interface AddSubscriptionCardProps {
   onClick: () => void;
 }
 
-// The AddSubscriptionCard component is a button-like card for adding new subscriptions.
 const AddSubscriptionCard: React.FC<AddSubscriptionCardProps> = ({ onClick }) => {
   return (
     <Card

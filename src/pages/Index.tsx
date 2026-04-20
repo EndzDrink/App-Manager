@@ -15,7 +15,6 @@ import {
   Lightbulb 
 } from "lucide-react";
 
-// Mock data for initial state
 const initialApps = [
   { id: '1', name: 'Spotify', category: 'Music & Audio', dailyUsage: '2h 15m', size: '250 MB', lastUsed: 'Today', icon: '🎧', color: 'bg-green-500' },
   { id: '2', name: 'Google Docs', category: 'Productivity', dailyUsage: '30m', size: '100 MB', lastUsed: 'Yesterday', icon: '📄', color: 'bg-blue-500' },
@@ -46,17 +45,14 @@ const Index = () => {
       case "admin":
         return <AdminTab />;
       case "apps":
-        // Correctly pass the apps state and the function to the AppsTab component
         return <AppsTab apps={apps} onAddApp={handleAddApp} />;
       case "subscriptions":
-        // Correctly pass the subscriptions state and the function to the SubscriptionsTab component
         return <SubscriptionsTab subscriptions={subscriptions} onAddSubscription={handleAddSubscription} />;
       case "recommendations":
         return <RecommendationsTab />;
       default:
         return (
           <>
-            {/* Metrics Grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
               <MetricCard
                 icon={<Smartphone className="h-5 w-5" />}

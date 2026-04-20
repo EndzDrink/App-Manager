@@ -1,13 +1,11 @@
 import React from 'react';
-import { Plus } from 'lucide-react'; // Assuming lucide-react is installed
-import { Card } from "@/components/ui/card"; // Import the Card component
+import { Plus } from 'lucide-react'; 
+import { Card } from "@/components/ui/card"; 
 
-// Define the props for the AddAppCard component
 interface AddAppCardProps {
   onClick: () => void;
 }
 
-// The AddAppCard component is a button-like card for adding new applications.
 const AddAppCard: React.FC<AddAppCardProps> = ({ onClick }) => {
   return (
     <Card

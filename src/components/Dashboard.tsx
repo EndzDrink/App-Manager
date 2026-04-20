@@ -6,8 +6,6 @@ import AddSubscriptionCard from './AddSubscriptionCard';
 import { DashboardHeader } from './DashboardHeader';
 import { DashboardTabs } from './DashboardTabs';
 
-// Placeholder components to match the screenshot's layout.
-// These would contain the actual chart implementations.
 const MetricsCard = ({ title, value, description }) => (
   <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
     <h3 className="text-sm font-medium text-gray-500 mb-1">{title}</h3>
@@ -26,7 +24,6 @@ const WeeklyUsageChart = () => (
       <h3 className="text-lg font-semibold text-gray-900">Weekly Usage</h3>
     </div>
     <p className="text-sm text-gray-500 mb-4">App usage throughout the week</p>
-    {/* Placeholder for the bar chart */}
     <div className="space-y-4">
       {['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'].map(day => (
         <div key={day} className="flex items-center">
@@ -50,7 +47,6 @@ const UsageByCategoryChart = () => (
       <h3 className="text-lg font-semibold text-gray-900">Usage by Category</h3>
     </div>
     <p className="text-sm text-gray-500 mb-4">Weekly minutes by app category</p>
-    {/* Placeholder for the bar chart */}
     <div className="space-y-4">
       {['Entertainment', 'Productivity', 'Games', 'Communication', 'Utilities'].map(category => (
         <div key={category} className="flex items-center">
@@ -76,29 +72,24 @@ const dummySubscriptions = [
   { id: 2, subscriptionName: 'Design Suite', cost: 24.99, renewalDate: '2025-10-22' },
 ];
 
-// The Dashboard component is the main container for all the application's cards and widgets.
 const Dashboard = () => {
   const [activeTab, setActiveTab] = React.useState('dashboard');
 
   const handleAddApp = () => {
     console.log('Add App button clicked!');
-    // Here you would open a modal or navigate to a new page
   };
 
   const handleAddSubscription = () => {
     console.log('Add Subscription button clicked!');
-    // Here you would open a new modal or navigate to a new page
   };
 
   return (
     <div className="p-8 font-inter">
-      {/* The DashboardHeader remains at the top of the page */}
       {activeTab !== 'admin' && <DashboardHeader />}
       
       {/* Content for the active tab */}
       {activeTab === 'dashboard' && (
         <>
-          {/* Container for the metrics cards, now placed above the tabs */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
             <MetricsCard title="Total Apps" value="5" description="4 active • 1 unused" />
             <MetricsCard title="Subscriptions" value="4" description="3 actively used" />
@@ -106,18 +97,14 @@ const Dashboard = () => {
             <MetricsCard title="Recommendations" value="2" description="Optimization suggestions" />
           </div>
 
-          {/* The navigation tabs are now placed just below the metrics cards */}
           <DashboardTabs activeTab={activeTab} onTabChange={setActiveTab} />
           
-          {/* Content for Your Applications and Subscriptions, as well as the charts, are now below the tabs */}
           <div className="mt-8">
-            {/* Charts from the screenshot */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
               <WeeklyUsageChart />
               <UsageByCategoryChart />
             </div>
             
-            {/* Container for App Cards (this content from your original code) */}
             <h2 className="text-2xl font-semibold mt-8 mb-4">Your Applications</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6 mb-8">
               {dummyApps.map(app => (
@@ -126,7 +113,6 @@ const Dashboard = () => {
               <AddAppCard onClick={handleAddApp} />
             </div>
             
-            {/* Container for Subscription Cards (this content from your original code) */}
             <h2 className="text-2xl font-semibold mb-4">Your Subscriptions</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
               {dummySubscriptions.map(sub => (
@@ -137,7 +123,6 @@ const Dashboard = () => {
           </div>
         </>
       )}
-      {/* Add content for other tabs here */}
     </div>
   );
 };
