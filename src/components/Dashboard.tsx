@@ -1,8 +1,6 @@
 import React from 'react';
 import AppCard from './AppCard';
-import SubscriptionCard from './SubscriptionCard';
 import AddAppCard from './AddAppCard';
-import AddSubscriptionCard from './AddSubscriptionCard';
 import { DashboardHeader } from './DashboardHeader';
 import { DashboardTabs } from './DashboardTabs';
 
@@ -115,10 +113,6 @@ const Dashboard = () => {
             
             <h2 className="text-2xl font-semibold mb-4">Your Subscriptions</h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-              {dummySubscriptions.map(sub => (
-                <SubscriptionCard key={sub.id} subscriptionName={sub.subscriptionName} cost={sub.cost} renewalDate={sub.renewalDate} />
-              ))}
-              <AddSubscriptionCard onClick={handleAddSubscription} />
             </div>
           </div>
         </>

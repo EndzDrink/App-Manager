@@ -1,73 +1,118 @@
+import React, { useState } from 'react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Download, RotateCcw, RefreshCw, Settings } from "lucide-react";
+import { Download, RotateCcw, RefreshCw, Settings, Wallet, Save, Loader2, Globe, Plus, Link2 } from "lucide-react";
 
-export const AdminTab = () => {
+interface AdminTabProps {
+  stats: { totalApps: number; activeSubscriptions: number; recommendations: number; monthlyCost: number; };
+  budget: number;
+  connectors: any[];
+  onRefresh: () => void;
+  onExport: () => void;
+  onUpdateBudget: (newBudget: number) => Promise<void>;
+  onAddConnector: (connector: any) => Promise<void>;
+}
+
+export const AdminTab: React.FC<AdminTabProps> = ({ stats, budget, connectors, onRefresh, onExport, onUpdateBudget, onAddConnector }) => {
+  const [newBudget, setNewBudget] = useState(budget.toString());
+  const [isSaving, setIsSaving] = useState(false);
+  const [isAddingConnector, setIsAddingConnector] = useState(false);
+
+  // New Connector State
+  const [provider, setProvider] = useState('Okta');
+  const [endpoint, setEndpoint] = useState('');
+  const [apiKey, setApiKey] = useState('');
+
+  const handleAddConnector = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await onAddConnector({ provider_name: provider, api_endpoint: endpoint, api_key: apiKey, sync_frequency: 'daily' });
+    setIsAddingConnector(false);
+    setEndpoint('');
+    setApiKey('');
+  };
+
   return (
     <div className="space-y-8">
-      <div>
-        <div className="flex items-center space-x-3 mb-6">
-          <Settings className="h-5 w-5 text-metric-label" />
-          <h2 className="text-xl font-semibold text-metric-value">Data Management</h2>
+      {/* 1. Data Connectors (Enterprise Section) */}
+      <section>
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center space-x-3">
+            <Globe className="h-5 w-5 text-blue-500" />
+            <h2 className="text-xl font-semibold text-metric-value">External Integrations</h2>
+          </div>
+          <Button size="sm" onClick={() => setIsAddingConnector(true)} className="bg-blue-600 hover:bg-blue-700 text-white">
+            <Plus className="h-4 w-4 mr-2" /> Connect API
+          </Button>
         </div>
-        <p className="text-sm text-metric-label mb-6">Import, export, and manage your app and subscription data</p>
-        
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card className="p-6 bg-metric-card border border-border shadow-sm text-center">
-            <Download className="h-8 w-8 text-metric-label mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-metric-value mb-2">Export Data</h3>
-            <p className="text-sm text-metric-label mb-4">Download JSON backup</p>
-            <Button variant="outline" size="sm" className="border-border text-metric-label hover:bg-secondary">
-              Export
-            </Button>
-          </Card>
-          
-          <Card className="p-6 bg-metric-card border border-border shadow-sm text-center">
-            <RotateCcw className="h-8 w-8 text-orange-500 mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-metric-value mb-2">Reset Data</h3>
-            <p className="text-sm text-metric-label mb-4">Restore sample data</p>
-            <Button variant="outline" size="sm" className="border-orange-500 text-orange-500 hover:bg-orange-50">
-              Reset
-            </Button>
-          </Card>
-          
-          <Card className="p-6 bg-metric-card border border-border shadow-sm text-center">
-            <RefreshCw className="h-8 w-8 text-metric-label mx-auto mb-4" />
-            <h3 className="text-lg font-semibold text-metric-value mb-2">Refresh All</h3>
-            <p className="text-sm text-metric-label mb-4">Reload from database</p>
-            <Button variant="outline" size="sm" className="border-border text-metric-label hover:bg-secondary">
-              Refresh
-            </Button>
-          </Card>
-        </div>
-      </div>
 
-      {/* Quick Stats Section */}
-      <div>
-        <h2 className="text-xl font-semibold text-metric-value mb-2">Quick Stats</h2>
-        <p className="text-sm text-metric-label mb-6">Current database statistics</p>
-        
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-          <Card className="p-6 bg-blue-50 border border-blue-200 shadow-sm text-center">
-            <div className="text-4xl font-bold text-blue-600 mb-2">5</div>
-            <div className="text-sm font-medium text-blue-800">Total Apps</div>
+        {isAddingConnector && (
+          <Card className="p-6 mb-6 border-blue-200 bg-blue-50/30">
+            <form onSubmit={handleAddConnector} className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <input value={provider} onChange={e => setProvider(e.target.value)} placeholder="Provider (e.g. Azure AD)" className="p-2 border rounded bg-white text-sm" required />
+              <input value={endpoint} onChange={e => setEndpoint(e.target.value)} placeholder="API Endpoint URL" className="p-2 border rounded bg-white text-sm" required />
+              <input value={apiKey} onChange={e => setApiKey(e.target.value)} type="password" placeholder="API Key / Token" className="p-2 border rounded bg-white text-sm" required />
+              <div className="md:col-span-3 flex justify-end space-x-2">
+                <Button type="button" variant="ghost" onClick={() => setIsAddingConnector(false)}>Cancel</Button>
+                <Button type="submit" className="bg-blue-600 text-white">Save Connector</Button>
+              </div>
+            </form>
           </Card>
-          
-          <Card className="p-6 bg-green-50 border border-green-200 shadow-sm text-center">
-            <div className="text-4xl font-bold text-green-600 mb-2">4</div>
-            <div className="text-sm font-medium text-green-800">Active Subscriptions</div>
-          </Card>
-          
-          <Card className="p-6 bg-purple-50 border border-purple-200 shadow-sm text-center">
-            <div className="text-4xl font-bold text-purple-600 mb-2">2</div>
-            <div className="text-sm font-medium text-purple-800">Recommendations</div>
-          </Card>
-          
-          <Card className="p-6 bg-orange-50 border border-orange-200 shadow-sm text-center">
-            <div className="text-4xl font-bold text-orange-600 mb-2">ZAR 109</div>
-            <div className="text-sm font-medium text-orange-800">Monthly Cost</div>
-          </Card>
+        )}
+
+        <div className="grid grid-cols-1 gap-4">
+          {connectors.length === 0 ? (
+            <p className="text-sm text-metric-label italic text-center py-8 border-2 border-dashed rounded-lg">No active data pipelines found.</p>
+          ) : (
+            connectors.map(conn => (
+              <Card key={conn.id} className="p-4 bg-metric-card border border-border flex items-center justify-between">
+                <div className="flex items-center space-x-4">
+                  <div className="w-10 h-10 bg-secondary rounded-full flex items-center justify-center">
+                    <Link2 className="h-5 w-5 text-blue-500" />
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-metric-value">{conn.provider_name}</h3>
+                    <p className="text-xs text-metric-label">{conn.api_endpoint}</p>
+                  </div>
+                </div>
+                <div className="flex items-center space-x-4">
+                  <span className="text-[10px] font-bold uppercase px-2 py-1 bg-green-100 text-green-700 rounded-full">{conn.status}</span>
+                  <div className="text-right text-[10px] text-metric-label">
+                    <div>FREQ: {conn.sync_frequency}</div>
+                    <div>LAST: {conn.last_sync ? new Date(conn.last_sync).toLocaleDateString() : 'Pending'}</div>
+                  </div>
+                </div>
+              </Card>
+            ))
+          )}
         </div>
+      </section>
+
+      {/* 2. Management & Budget (Existing Logic) */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <section>
+          <div className="flex items-center space-x-3 mb-6">
+            <Settings className="h-5 w-5 text-metric-label" />
+            <h2 className="text-xl font-semibold text-metric-value">System Tools</h2>
+          </div>
+          <div className="grid grid-cols-3 gap-4">
+            <Button onClick={onExport} variant="outline" className="flex-col h-auto py-4 text-xs"><Download className="h-5 w-5 mb-2" />Export</Button>
+            <Button variant="outline" className="flex-col h-auto py-4 text-xs border-orange-200 text-orange-500"><RotateCcw className="h-5 w-5 mb-2" />Reset</Button>
+            <Button onClick={onRefresh} variant="outline" className="flex-col h-auto py-4 text-xs border-blue-200 text-blue-500"><RefreshCw className="h-5 w-5 mb-2" />Sync</Button>
+          </div>
+        </section>
+
+        <section>
+          <div className="flex items-center space-x-3 mb-6">
+            <Wallet className="h-5 w-5 text-metric-label" />
+            <h2 className="text-xl font-semibold text-metric-value">Spending Limit</h2>
+          </div>
+          <Card className="p-4 bg-metric-card border border-border">
+            <div className="flex space-x-3">
+              <input type="number" className="flex-1 p-2 bg-transparent border rounded text-metric-value" value={newBudget} onChange={e => setNewBudget(e.target.value)} />
+              <Button onClick={() => onUpdateBudget(parseFloat(newBudget))} disabled={isSaving} className="bg-primary text-white">Save</Button>
+            </div>
+          </Card>
+        </section>
       </div>
     </div>
   );

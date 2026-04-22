@@ -1,60 +1,56 @@
+import React from 'react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Trash2, X } from "lucide-react";
+import { Lightbulb, XCircle } from "lucide-react";
 
-const recommendations = [
-  {
-    id: 1,
-    type: "remove",
-    title: "Remove App: Unused Calculator Pro",
-    description: "Not used for 49 days. Free up 12.3 MB of storage.",
-    confidence: "90% confidence",
-    action: "Remove",
-    actionColor: "bg-red-500 hover:bg-red-600 text-white"
-  },
-  {
-    id: 2,
-    type: "cancel",
-    title: "Cancel Subscription: Gym Membership App",
-    description: "No usage detected. Save ZAR 29.99/month. Potential yearly savings: $359.88",
-    confidence: "95% confidence",
-    action: "Cancel",
-    actionColor: "bg-red-500 hover:bg-red-600 text-white"
-  }
-];
+interface RecommendationsTabProps {
+  recommendations: any[];
+  onReclaim: (id: number) => Promise<void>;
+}
 
-export const RecommendationsTab = () => {
+export const RecommendationsTab: React.FC<RecommendationsTabProps> = ({ recommendations, onReclaim }) => {
   return (
-    <div className="space-y-6">
-      {recommendations.map((rec) => (
-        <Card key={rec.id} className="p-6 bg-metric-card border border-border shadow-sm">
-          <div className="flex items-start justify-between">
-            <div className="flex items-start space-x-4">
-              <div className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                rec.type === 'remove' ? 'bg-orange-100' : 'bg-red-100'
-              }`}>
-                {rec.type === 'remove' ? (
-                  <Trash2 className={`h-4 w-4 ${rec.type === 'remove' ? 'text-orange-500' : 'text-red-500'}`} />
-                ) : (
-                  <X className="h-4 w-4 text-red-500" />
-                )}
+    <div className="space-y-6 animate-in fade-in duration-500">
+      <div>
+        <h2 className="text-xl font-semibold text-metric-value">Cost Recommendations</h2>
+        <p className="text-sm text-metric-label">Automated insights to identify underutilized licenses and optimize your SaaS spend.</p>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4">
+        {recommendations.length === 0 ? (
+          <p className="text-sm text-metric-label italic py-8 border-2 border-dashed rounded-lg text-center">
+            Your environment is fully optimized. No current recommendations.
+          </p>
+        ) : (
+          recommendations.map((rec, i) => (
+            <Card key={rec.id || i} className="p-5 bg-white border border-border shadow-sm flex items-center justify-between hover:shadow-md transition-all">
+              <div className="flex items-start space-x-4">
+                <div className="p-2 bg-yellow-100 rounded-lg shrink-0 mt-1">
+                  <Lightbulb className="h-5 w-5 text-yellow-600" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-metric-value">{rec.title}</h3>
+                  <p className="text-sm text-metric-label mt-1">{rec.description}</p>
+                </div>
               </div>
               
-              <div className="flex-1">
-                <h3 className="font-semibold text-metric-value mb-2">{rec.title}</h3>
-                <p className="text-sm text-metric-label mb-3">{rec.description}</p>
-              </div>
-            </div>
-            
-            <div className="flex items-center space-x-4">
-              <span className="text-sm font-medium text-metric-value">{rec.confidence}</span>
-              <Button className={rec.actionColor}>
-                {rec.action}
+              <Button 
+                variant="outline" 
+                className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 shrink-0"
+                onClick={() => {
+                  if(rec.id) {
+                    onReclaim(rec.id);
+                  } else {
+                    console.error("No subscription ID attached to this recommendation.");
+                  }
+                }}
+              >
+                <XCircle className="h-4 w-4 mr-2" /> Reclaim License
               </Button>
-            </div>
-          </div>
-        </Card>
-      ))}
+            </Card>
+          ))
+        )}
+      </div>
     </div>
   );
 };

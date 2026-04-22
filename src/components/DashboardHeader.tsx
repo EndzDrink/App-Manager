@@ -1,7 +1,12 @@
 import { Button } from "@/components/ui/button";
 import { Download, RefreshCw, Monitor } from "lucide-react";
 
-export const DashboardHeader = () => {
+interface DashboardHeaderProps {
+  onRefresh?: () => void;
+  onExport?: () => void; // Add this line
+}
+
+export const DashboardHeader = ({ onRefresh, onExport }: DashboardHeaderProps) => {
   return (
     <header className="flex items-center justify-between mb-8">
       <div className="flex items-center space-x-3">
@@ -15,14 +20,27 @@ export const DashboardHeader = () => {
       </div>
       
       <div className="flex items-center space-x-3">
-        <Button variant="outline" size="sm" className="bg-white border-gray-200 text-gray-500 hover:bg-gray-50 shadow-sm transition-colors duration-200">
+        {/* Wire up the Export button */}
+        <Button 
+          onClick={onExport} 
+          variant="outline" 
+          size="sm" 
+          className="bg-white border-gray-200 text-gray-500 hover:bg-gray-50 shadow-sm transition-colors duration-200"
+        >
           <Download className="h-4 w-4 mr-2" />
           Export
         </Button>
-        <Button variant="outline" size="sm" className="bg-white border-gray-200 text-gray-500 hover:bg-gray-50 shadow-sm transition-colors duration-200">
+        
+        <Button 
+          variant="outline" 
+          size="sm" 
+          className="bg-white border-gray-200 text-gray-500 hover:bg-gray-50 shadow-sm transition-colors duration-200"
+          onClick={onRefresh}
+        >
           <RefreshCw className="h-4 w-4 mr-2" />
           Refresh
         </Button>
+        
         <Button variant="default" size="sm" className="bg-green-600 hover:bg-green-700 text-white shadow-sm transition-colors duration-200">
           <Monitor className="h-4 w-4 mr-2" />
           Live Dashboard
@@ -31,4 +49,5 @@ export const DashboardHeader = () => {
     </header>
   );
 };
+
 export default DashboardHeader;
