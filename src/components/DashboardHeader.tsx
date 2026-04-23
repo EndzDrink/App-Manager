@@ -1,12 +1,12 @@
 import { Button } from "@/components/ui/button";
-import { Download, RefreshCw, Monitor, ShieldAlert, Shield, User, LogOut, Tv } from "lucide-react";
+import { Download, RefreshCw, Monitor, ShieldAlert, Shield, User, LogOut } from "lucide-react";
 
 interface DashboardHeaderProps {
   onRefresh?: () => void;
   onExport?: () => void;
   role: string;
   onLogout: () => void;
-  onEnterLiveMode: () => void; // Added to support Live Dashboard presentation
+  onEnterLiveMode: () => void; 
 }
 
 export const DashboardHeader = ({ onRefresh, onExport, role, onLogout, onEnterLiveMode }: DashboardHeaderProps) => {
@@ -33,14 +33,14 @@ export const DashboardHeader = ({ onRefresh, onExport, role, onLogout, onEnterLi
 
         <div className="hidden sm:block h-8 w-px bg-gray-200 mx-1"></div>
 
-        {/* NEW: Live Dashboard Button */}
+        {/* UPDATED: Live Dashboard Button with Monitor Icon and Success Styling */}
         <Button 
           onClick={onEnterLiveMode} 
           variant="outline" 
           size="sm" 
-          className="bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100 shadow-sm transition-colors duration-200 font-semibold"
+          className="inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 h-9 rounded-md px-3 bg-green-600 hover:bg-green-700 text-white shadow-sm transition-colors duration-200 border-none"
         >
-          <Tv className="h-4 w-4 mr-2" /> Live Dashboard
+          <Monitor className="h-4 w-4 mr-2" /> Live Dashboard
         </Button>
 
         <Button onClick={onExport} variant="outline" size="sm" className="bg-white border-gray-200 text-gray-500 hover:bg-gray-50 shadow-sm transition-colors duration-200">
