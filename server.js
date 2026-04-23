@@ -7,22 +7,51 @@ import bcrypt from 'bcrypt';
 
 const { Pool } = pg;
 const app = express();
-const port = 3000;
+const port = process.env.PORT || 3000;
 
 const JWT_SECRET = process.env.JWT_SECRET || 'enterprise_super_secret_key_2026';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
-app.use(cors());
+// --- 1. ENTERPRISE SECURITY & CORS CONFIGURATION ---
+// PRODUCTION NOTE: For the demo, we allow all origins. In prod, uncomment the origin restriction.
+app.use(cors({
+  // origin: ['https://dashboard.ethekwini.gov.za', 'http://localhost:5173'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  credentials: true
+}));
 app.use(express.json());
 
+// --- 2. DATABASE CONNECTION POOL ---
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false, sslmode: 'require' }
+  ssl: { rejectUnauthorized: false, sslmode: 'require' },
+  max: 20, // Scalability: Allows up to 20 concurrent connections for high traffic
+  idleTimeoutMillis: 30000
 });
 
 console.log("✅ Municipal Connection Pool Initialized.");
 
-// --- 0. AUTHENTICATION & SECURITY ---
+// --- 3. AUTHENTICATION MIDDLEWARE (The "Bouncer") ---
+// PRODUCTION NOTE: Applied to protect routes in production. Currently bypassed for seamless demo testing.
+const authenticateToken = (req, res, next) => {
+  // DEMO BYPASS: Remove the next two lines in production
+  req.user = { role: 'SuperAdmin' }; 
+  return next(); 
+
+  /* PRODUCTION LOGIC:
+  const authHeader = req.headers['authorization'];
+  const token = authHeader && authHeader.split(' ')[1];
+  if (!token) return res.status(401).json({ error: "Access Denied. No token provided." });
+
+  jwt.verify(token, JWT_SECRET, (err, user) => {
+    if (err) return res.status(403).json({ error: "Invalid or expired token." });
+    req.user = user;
+    next();
+  });
+  */
+};
+
+// --- 4. AUTHENTICATION ROUTES ---
 app.post('/api/auth/setup', async (req, res) => {
   try {
     const checkAdmin = await pool.query("SELECT * FROM admin_users WHERE email = 'admin@organization.com'");
@@ -57,10 +86,11 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Login failed" }); }
 });
 
-// --- LOCALIZED PMO INTEGRATION ---
+// --- 5. DATA CONNECTOR & ETL ROUTES (With SQL Transactions) ---
 app.post('/api/pmo/sync', async (req, res) => {
   const client = await pool.connect();
   try {
+    await client.query('BEGIN'); // Start Transaction
     const municipalProjects = [
       { project_name: "eThekwini Smart Meter Rollout", pmo_ref: "ETH-2026-UTIL", status: "Active" },
       { project_name: "Pinetown Infrastructure Upgrade", pmo_ref: "ETH-2025-CIVIL", status: "Closed" },
@@ -70,13 +100,56 @@ app.post('/api/pmo/sync', async (req, res) => {
     for (const row of municipalProjects) {
       await client.query('INSERT INTO pmo_projects (project_name, pmo_reference_code, status) VALUES ($1, $2, $3) ON CONFLICT (project_name) DO UPDATE SET status = EXCLUDED.status', [row.project_name, row.pmo_ref, row.status]);
     }
+    await client.query('COMMIT'); // Save Changes
     res.json({ message: "Municipal PMO Sync Successful", records_processed: municipalProjects.length });
-  } catch (err) { res.status(500).json({ error: "PMO Sync failed", details: err.message }); } finally { client.release(); }
+  } catch (err) { 
+    await client.query('ROLLBACK'); // Revert changes on error
+    res.status(500).json({ error: "PMO Sync failed", details: err.message }); 
+  } finally { 
+    client.release(); 
+  }
+});
+
+app.post('/api/connectors/:id/sync', async (req, res) => {
+  const { id } = req.params;
+  const client = await pool.connect();
+  try {
+    const connectorRes = await client.query('SELECT * FROM data_connectors WHERE id = $1', [id]);
+    if (connectorRes.rowCount === 0) return res.status(404).json({ error: "Connector not found" });
+    
+    await client.query('BEGIN'); // Strict Transactional Integrity
+    
+    const municipalData = [
+      { email: "dir.water@durban.gov.za", dept: "Water & Sanitation", apps: [{ name: "ArcGIS", category: "Mapping", price: 1250.00, usage: 300 }, { name: "Slack", category: "Communication", price: 150.00, usage: 20 }] },
+      { email: "ops.police@durban.gov.za", dept: "Metro Police", apps: [{ name: "Jira", category: "Operations", price: 450.00, usage: 450 }, { name: "Slack", category: "Communication", price: 150.00, usage: 10 }] },
+      { email: "head.parks@durban.gov.za", dept: "Parks & Recreation", apps: [{ name: "Asana", category: "Projects", price: 380.00, usage: 5 }] },
+      { email: "cio.office@durban.gov.za", dept: "IT & Infrastructure", apps: [{ name: "Jira", category: "Operations", price: 450.00, usage: 800 }, { name: "Zoom", category: "Communication", price: 280.00, usage: 1200 }] }
+    ];
+
+    for (const entry of municipalData) {
+      const d = await client.query('INSERT INTO departments (name, budget_limit) VALUES ($1, 50000.00) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id', [entry.dept]);
+      const u = await client.query('INSERT INTO users (email, department_id) VALUES ($1, $2) ON CONFLICT (email) DO UPDATE SET department_id=EXCLUDED.department_id RETURNING id', [entry.email, d.rows[0].id]);
+      for (const app of entry.apps) {
+        const a = await client.query('INSERT INTO enterprise_systems (name, category) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET category=EXCLUDED.category RETURNING id', [app.name, app.category]);
+        await client.query('INSERT INTO subscriptions (user_id, app_id, price, status) VALUES ($1, $2, $3, \'active\') ON CONFLICT DO NOTHING', [u.rows[0].id, a.rows[0].id, app.price]);
+        await client.query('INSERT INTO usage_logs (app_id, user_id, duration_minutes, log_date) VALUES ($1, $2, $3, CURRENT_DATE)', [a.rows[0].id, u.rows[0].id, app.usage]);
+      }
+    }
+    await client.query('UPDATE data_connectors SET last_sync = CURRENT_TIMESTAMP, status = \'active\' WHERE id = $1', [id]);
+    
+    await client.query('COMMIT');
+    res.json({ message: "Durban Gov Sync Successful" });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    res.status(500).json({ error: "Sync failed", details: err.message });
+  } finally { 
+    client.release(); 
+  }
 });
 
 app.post('/api/users/sync', async (req, res) => { setTimeout(() => { res.json({ message: "Identity Provider Sync Complete" }); }, 1000); });
 
-// --- LOCALIZED CIO AI ADVISOR ENGINE ---
+// --- 6. AI ADVISOR ENGINE ---
 app.get('/api/ai/insights', async (req, res) => {
   try {
     const costRes = await pool.query(`SELECT SUM(price) as total FROM subscriptions WHERE status = 'active'`);
@@ -113,27 +186,8 @@ app.get('/api/ai/insights', async (req, res) => {
   }
 });
 
-// --- 1. GOVERNANCE & DRILL-DOWN ---
-app.delete('/api/subscriptions/:id', async (req, res) => {
-  try {
-    await pool.query('DELETE FROM subscriptions WHERE id = $1', [req.params.id]);
-    res.json({ message: "License reclaimed successfully." });
-  } catch (err) { res.status(500).json({ error: "Reclamation failed" }); }
-});
+// --- 7. CORE BUSINESS LOGIC (Metrics, Systems, Subscriptions) ---
 
-app.get('/api/departments/:id/details', async (req, res) => {
-  const { id } = req.params;
-  try {
-    const deptRes = await pool.query('SELECT id, name, budget_limit FROM departments WHERE id = $1', [id]);
-    if (deptRes.rowCount === 0) return res.status(404).json({ error: "Department not found" });
-    const usersRes = await pool.query(`SELECT u.id, u.email, TO_CHAR(u.onboarding_date, 'YYYY-MM-DD') as joined, (SELECT COUNT(*) FROM subscriptions WHERE user_id = u.id AND status = 'active') as active_licenses FROM users u WHERE u.department_id = $1 ORDER BY u.email`, [id]);
-    const appsRes = await pool.query(`SELECT a.name, a.category, SUM(s.price) as total_cost, COUNT(s.id) as active_seats FROM enterprise_systems a JOIN subscriptions s ON a.id = s.app_id JOIN users u ON s.user_id = u.id WHERE u.department_id = $1 AND s.status = 'active' GROUP BY a.name, a.category ORDER BY total_cost DESC`, [id]);
-    const totalSpend = appsRes.rows.reduce((sum, app) => sum + parseFloat(app.total_cost), 0);
-    res.json({ department: deptRes.rows[0], users: usersRes.rows, apps: appsRes.rows, totalSpend });
-  } catch (err) { res.status(500).json({ error: "Failed to fetch department details" }); }
-});
-
-// --- 2. TRENDS & METRICS ---
 app.get('/api/metrics/trends', async (req, res) => {
   try {
     const currentRes = await pool.query(`SELECT SUM(price) as total FROM subscriptions WHERE status = 'active'`);
@@ -155,7 +209,6 @@ app.get('/api/metrics/monthly-cost', async (req, res) => {
   res.json({ total: parseFloat(r.rows[0].total_cost || 0) });
 });
 
-// ENHANCED: Dynamic Timeline Engine for BI Toggle
 app.get('/api/metrics/usage/timeline', async (req, res) => {
   const { system = 'All', dept = 'All', timeframe = 'weekly' } = req.query;
   try {
@@ -182,12 +235,8 @@ app.get('/api/metrics/usage/timeline', async (req, res) => {
     }
 
     const r = await pool.query(`
-      WITH timeline AS (
-        SELECT ${seriesConfig} AS report_date
-      )
-      SELECT 
-        ${labelFormat} as period_label, 
-        COALESCE(SUM(filtered.duration_minutes), 0) as total_minutes
+      WITH timeline AS (SELECT ${seriesConfig} AS report_date)
+      SELECT ${labelFormat} as period_label, COALESCE(SUM(filtered.duration_minutes), 0) as total_minutes
       FROM timeline days
       LEFT JOIN (
         SELECT u.log_date, u.duration_minutes
@@ -222,39 +271,66 @@ app.get('/api/metrics/usage/category', async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- LOCALIZED DATA CONNECTOR SYNC ---
-app.post('/api/connectors/:id/sync', async (req, res) => {
-  const { id } = req.params;
-  const client = await pool.connect();
-  try {
-    const connectorRes = await client.query('SELECT * FROM data_connectors WHERE id = $1', [id]);
-    if (connectorRes.rowCount === 0) return res.status(404).json({ error: "Connector not found" });
-    
-    // Municipal Data Setup
-    const municipalData = [
-      { email: "dir.water@durban.gov.za", dept: "Water & Sanitation", apps: [{ name: "ArcGIS", category: "Mapping", price: 1250.00, usage: 300 }, { name: "Slack", category: "Communication", price: 150.00, usage: 20 }] },
-      { email: "ops.police@durban.gov.za", dept: "Metro Police", apps: [{ name: "Jira", category: "Operations", price: 450.00, usage: 450 }, { name: "Slack", category: "Communication", price: 150.00, usage: 10 }] },
-      { email: "head.parks@durban.gov.za", dept: "Parks & Recreation", apps: [{ name: "Asana", category: "Projects", price: 380.00, usage: 5 }] },
-      { email: "cio.office@durban.gov.za", dept: "IT & Infrastructure", apps: [{ name: "Jira", category: "Operations", price: 450.00, usage: 800 }, { name: "Zoom", category: "Communication", price: 280.00, usage: 1200 }] }
-    ];
+app.get('/api/systems', async (req, res) => {
+  const r = await pool.query(`SELECT a.id, a.name, a.category, TO_CHAR(a.created_at, 'YYYY-MM-DD') as created_at, COALESCE(array_agg(DISTINCT d.name) FILTER (WHERE d.name IS NOT NULL), '{}') as departments FROM enterprise_systems a LEFT JOIN subscriptions s ON a.id = s.app_id AND s.status = 'active' LEFT JOIN users u ON s.user_id = u.id LEFT JOIN departments d ON u.department_id = d.id GROUP BY a.id ORDER BY a.created_at DESC`);
+  res.json(r.rows);
+});
 
-    for (const entry of municipalData) {
-      const d = await client.query('INSERT INTO departments (name, budget_limit) VALUES ($1, 50000.00) ON CONFLICT (name) DO UPDATE SET name=EXCLUDED.name RETURNING id', [entry.dept]);
-      const u = await client.query('INSERT INTO users (email, department_id) VALUES ($1, $2) ON CONFLICT (email) DO UPDATE SET department_id=EXCLUDED.department_id RETURNING id', [entry.email, d.rows[0].id]);
-      for (const app of entry.apps) {
-        const a = await client.query('INSERT INTO enterprise_systems (name, category) VALUES ($1, $2) ON CONFLICT (name) DO UPDATE SET category=EXCLUDED.category RETURNING id', [app.name, app.category]);
-        await client.query('INSERT INTO subscriptions (user_id, app_id, price, status) VALUES ($1, $2, $3, \'active\') ON CONFLICT DO NOTHING', [u.rows[0].id, a.rows[0].id, app.price]);
-        await client.query('INSERT INTO usage_logs (app_id, user_id, duration_minutes, log_date) VALUES ($1, $2, $3, CURRENT_DATE)', [a.rows[0].id, u.rows[0].id, app.usage]);
-      }
+app.post('/api/systems', async (req, res) => {
+  const { name, category } = req.body;
+  try {
+    const check = await pool.query('SELECT * FROM enterprise_systems WHERE name ILIKE $1', [name]);
+    if (check.rowCount > 0) {
+      return res.status(409).json({ error: "Duplicate System", message: `Compliance Warning: '${name}' already exists in the eThekwini IT Catalog. Procurement denied.` });
     }
-    await client.query('UPDATE data_connectors SET last_sync = CURRENT_TIMESTAMP, status = \'active\' WHERE id = $1', [id]);
-    res.json({ message: "Durban Gov Sync Successful" });
-  } finally { client.release(); }
+    const r = await pool.query('INSERT INTO enterprise_systems (name, category) VALUES ($1, $2) RETURNING *', [name, category]);
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to add system" });
+  }
+});
+
+app.get('/api/subscriptions', async (req, res) => {
+  const r = await pool.query(`SELECT s.id, a.name, a.category, s.price, TO_CHAR(s.start_date, 'YYYY-MM-DD') as start_date, TO_CHAR(s.end_date, 'YYYY-MM-DD') as end_date, p.project_name FROM subscriptions s JOIN enterprise_systems a ON s.app_id = a.id LEFT JOIN pmo_projects p ON s.project_id = p.id WHERE s.status='active'`);
+  res.json(r.rows);
+});
+
+app.post('/api/subscriptions', async (req, res) => {
+  const { user_id, app_id, price } = req.body;
+  try {
+    const check = await pool.query("SELECT * FROM subscriptions WHERE user_id = $1 AND app_id = $2 AND status = 'active'", [user_id, app_id]);
+    if (check.rowCount > 0) {
+      return res.status(409).json({ error: "Duplicate License", message: "Compliance Warning: This employee already holds an active license for this system." });
+    }
+    const r = await pool.query("INSERT INTO subscriptions (user_id, app_id, price, start_date, status) VALUES ($1, $2, $3, CURRENT_DATE, 'active') RETURNING *", [user_id, app_id, price]);
+    res.status(201).json(r.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: "Failed to procure license", details: err.message });
+  }
+});
+
+app.delete('/api/subscriptions/:id', async (req, res) => {
+  try {
+    await pool.query('DELETE FROM subscriptions WHERE id = $1', [req.params.id]);
+    res.json({ message: "License reclaimed successfully." });
+  } catch (err) { res.status(500).json({ error: "Reclamation failed" }); }
 });
 
 app.get('/api/users', async (req, res) => {
   const r = await pool.query(`SELECT u.id, u.email, COALESCE(d.name, 'Unassigned') as department, TO_CHAR(u.onboarding_date, 'YYYY-MM-DD') as onboarding_date, COALESCE(json_agg(json_build_object('id', s.id, 'name', es.name, 'category', es.category, 'price', s.price)) FILTER (WHERE s.id IS NOT NULL), '[]') as assigned_systems FROM users u LEFT JOIN departments d ON u.department_id = d.id LEFT JOIN subscriptions s ON u.id = s.user_id AND s.status='active' LEFT JOIN enterprise_systems es ON s.app_id = es.id GROUP BY u.id, d.name ORDER BY department ASC, u.email ASC`);
   res.json(r.rows);
+});
+
+app.get('/api/departments/:id/details', async (req, res) => {
+  const { id } = req.params;
+  try {
+    const deptRes = await pool.query('SELECT id, name, budget_limit FROM departments WHERE id = $1', [id]);
+    if (deptRes.rowCount === 0) return res.status(404).json({ error: "Department not found" });
+    const usersRes = await pool.query(`SELECT u.id, u.email, TO_CHAR(u.onboarding_date, 'YYYY-MM-DD') as joined, (SELECT COUNT(*) FROM subscriptions WHERE user_id = u.id AND status = 'active') as active_licenses FROM users u WHERE u.department_id = $1 ORDER BY u.email`, [id]);
+    const appsRes = await pool.query(`SELECT a.name, a.category, SUM(s.price) as total_cost, COUNT(s.id) as active_seats FROM enterprise_systems a JOIN subscriptions s ON a.id = s.app_id JOIN users u ON s.user_id = u.id WHERE u.department_id = $1 AND s.status = 'active' GROUP BY a.name, a.category ORDER BY total_cost DESC`, [id]);
+    const totalSpend = appsRes.rows.reduce((sum, app) => sum + parseFloat(app.total_cost), 0);
+    res.json({ department: deptRes.rows[0], users: usersRes.rows, apps: appsRes.rows, totalSpend });
+  } catch (err) { res.status(500).json({ error: "Failed to fetch department details" }); }
 });
 
 app.get('/api/audit/duplication', async (req, res) => {
@@ -272,16 +348,6 @@ app.get('/api/settings', async (req, res) => {
   res.json(r.rows[0] || { monthly_budget: 2000.00 });
 });
 
-app.get('/api/systems', async (req, res) => {
-  const r = await pool.query(`SELECT a.id, a.name, a.category, TO_CHAR(a.created_at, 'YYYY-MM-DD') as created_at, COALESCE(array_agg(DISTINCT d.name) FILTER (WHERE d.name IS NOT NULL), '{}') as departments FROM enterprise_systems a LEFT JOIN subscriptions s ON a.id = s.app_id AND s.status = 'active' LEFT JOIN users u ON s.user_id = u.id LEFT JOIN departments d ON u.department_id = d.id GROUP BY a.id ORDER BY a.created_at DESC`);
-  res.json(r.rows);
-});
-
-app.get('/api/subscriptions', async (req, res) => {
-  const r = await pool.query(`SELECT s.id, a.name, a.category, s.price, TO_CHAR(s.start_date, 'YYYY-MM-DD') as start_date, TO_CHAR(s.end_date, 'YYYY-MM-DD') as end_date, p.project_name FROM subscriptions s JOIN enterprise_systems a ON s.app_id = a.id LEFT JOIN pmo_projects p ON s.project_id = p.id WHERE s.status='active'`);
-  res.json(r.rows);
-});
-
 app.get('/api/connectors', async (req, res) => {
   const r = await pool.query('SELECT * FROM data_connectors ORDER BY id DESC');
   res.json(r.rows);
@@ -293,4 +359,4 @@ app.post('/api/connectors', async (req, res) => {
   res.status(201).json(result.rows[0]);
 });
 
-app.listen(port, () => console.log(`🚀 Municipal Analytics Engine active on http://localhost:${port}`));
+app.listen(port, () => console.log(`🚀 Municipal Analytics Engine active on port ${port}`));

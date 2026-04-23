@@ -10,10 +10,10 @@ import { UsersTab } from "@/components/UsersTab";
 import { AuditTab } from "@/components/AuditTab";
 import { DepartmentDetailTab } from "@/components/DepartmentDetailTab";
 import { Login } from "@/components/Login";
-import Footer from "@/components/Footer"; // <-- Added the Footer import
+import Footer from "@/components/Footer"; 
 import { Button } from "@/components/ui/button";
 import { 
-  CreditCard, DollarSign, Lightbulb, TrendingUp, TrendingDown, Lock, Server, Filter, Tv, X, 
+  CreditCard, DollarSign, Lightbulb, TrendingUp, TrendingDown, Lock, Server, Filter, X, 
   Monitor, ShieldAlert, Shield, User, LogOut, Download, RefreshCw, LayoutDashboard, Users, ShieldCheck, Settings
 } from "lucide-react";
 
@@ -41,7 +41,9 @@ const Index = () => {
   const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
   const [deptDetails, setDeptDetails] = useState<any>(null);
 
+  // --- THE NEW TRIPLE-TIER BI FILTERS ---
   const [biSystemFilter, setBiSystemFilter] = useState<string>("All");
+  const [biUnitFilter, setBiUnitFilter] = useState<string>("All"); 
   const [biDeptFilter, setBiDeptFilter] = useState<string>("All"); 
 
   const handleLogout = () => {
@@ -108,11 +110,12 @@ const Index = () => {
     if(token) refreshAllData(); 
   }, [token]);
 
-  if (!token) return <Login onLoginSuccess={handleLoginSuccess} />;
-
   // --- BI DASHBOARD CALCULATION LOGIC ---
   const allSystemNames = Array.from(new Set(systems.map(s => s.name)));
   const allDeptNames = Array.from(new Set(users.map(u => u.department).filter(d => d !== 'Unassigned')));
+  
+  // Static Units for Municipal Demo Context
+  const municipalUnits = ["Information Management Unit (IMU)", "Water & Sanitation Unit", "Cleansing & Solid Waste (DSW)", "Metro Police Unit"];
   
   const filteredSubscriptions = subscriptions.filter(sub => biSystemFilter === "All" || sub.name === biSystemFilter);
   const filteredMonthlyCost = biSystemFilter === "All" ? monthlyCost : filteredSubscriptions.reduce((sum, sub) => sum + parseFloat(sub.price || 0), 0);
@@ -120,6 +123,49 @@ const Index = () => {
 
   const percentUsed = budget > 0 ? (filteredMonthlyCost / budget) * 100 : 0;
   const costColor = percentUsed >= 100 ? "text-red-600" : percentUsed >= 80 ? "text-orange-500" : "text-green-600";
+
+  // --- CONTEXT-AWARE SMART EXPORT ---
+  const handleExportData = () => {
+    let csvContent = "";
+    let filename = "";
+    const dateStamp = new Date().toISOString().split('T')[0];
+
+    if (activeTab === 'systems') {
+      const headers = ['System ID', 'System Name', 'Category', 'Date Added', 'Deployed Departments'];
+      const rows = systems.map(app => [
+        app.id,
+        `"${app.name}"`, 
+        `"${app.category}"`, 
+        app.created_at, 
+        `"${app.departments?.join(', ') || 'None'}"`
+      ]);
+      csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+      filename = `eThekwini_IT_Catalog_${dateStamp}.csv`;
+    } else {
+      const headers = ['System Name', 'Category', 'Monthly Cost (ZAR)', 'Assigned Project', 'Status'];
+      const rows = filteredSubscriptions.map(sub => [
+        `"${sub.name}"`, 
+        `"${sub.category}"`, 
+        sub.price, 
+        `"${sub.project_name || 'Operational (No Project)'}"`, 
+        'Active'
+      ]);
+      csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+      filename = `Municipal_SaaS_Audit_${dateStamp}.csv`;
+    }
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  if (!token) return <Login onLoginSuccess={handleLoginSuccess} />;
 
   const UnauthorizedView = () => (
     <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in">
@@ -129,7 +175,6 @@ const Index = () => {
     </div>
   );
 
-  // --- SIDEBAR NAVIGATION CONFIGURATION ---
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin'] },
     { id: 'systems', label: 'Enterprise Systems', icon: Server, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin'] },
@@ -156,6 +201,7 @@ const Index = () => {
       </div>
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-12 items-start">
+        {/* We pass biDeptFilter down to simulate the data filter for charts */}
         <WeeklyUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} />
         {role !== 'StandardUser' ? (
            <CategoryUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} />
@@ -177,7 +223,7 @@ const Index = () => {
     }
 
     switch (activeTab) {
-      case "admin": return role === 'SuperAdmin' ? <AdminTab onRefresh={refreshAllData} onExport={() => {}} budget={budget} onUpdateBudget={handleUpdateBudget} connectors={connectors} onAddConnector={async () => {}} stats={{ totalApps: systems.length, activeSubscriptions: subscriptions.length, recommendations: recommendations.length, monthlyCost }} /> : <UnauthorizedView />;
+      case "admin": return role === 'SuperAdmin' ? <AdminTab onRefresh={refreshAllData} onExport={handleExportData} budget={budget} onUpdateBudget={handleUpdateBudget} connectors={connectors} onAddConnector={async () => {}} stats={{ totalApps: systems.length, activeSubscriptions: subscriptions.length, recommendations: recommendations.length, monthlyCost }} /> : <UnauthorizedView />;
       case "systems": return <AppsTab apps={systems} onAddApp={refreshAllData} />; 
       case "subscriptions": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? <SubscriptionsTab subscriptions={subscriptions} onAddSubscription={refreshAllData} /> : <UnauthorizedView />;
       case "users": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? <UsersTab users={users} onRefresh={refreshAllData} /> : <UnauthorizedView />;
@@ -187,14 +233,61 @@ const Index = () => {
     }
   };
 
+  // --- TRIPLE TIER RENDER FOR HEADERS ---
+  const renderTripleTierFilters = () => (
+    <div className="hidden lg:flex items-center bg-white border border-gray-200 rounded-lg shadow-sm">
+      <div className="px-3 text-gray-400 border-r border-gray-100 flex items-center bg-gray-50/50 rounded-l-lg h-9">
+        <Filter className="h-4 w-4" />
+      </div>
+      
+      {/* 1. Systems Slicer */}
+      <select 
+        className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-100 px-3 h-9 hover:bg-gray-50 transition-colors" 
+        value={biSystemFilter} 
+        onChange={(e) => setBiSystemFilter(e.target.value)}
+      >
+        <option value="All">All Systems</option>
+        {allSystemNames.map(name => <option key={name} value={name}>{name}</option>)}
+      </select>
+
+      {/* 2. Units Slicer */}
+      <select 
+        className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-100 px-3 h-9 hover:bg-gray-50 transition-colors" 
+        value={biUnitFilter} 
+        onChange={(e) => {
+          setBiUnitFilter(e.target.value);
+          // If they select IMU, auto-filter departments to EA as an example
+          if(e.target.value === "Information Management Unit (IMU)") {
+            setBiDeptFilter("Enterprise Architecture (EA)");
+          }
+        }}
+      >
+        <option value="All">All Units</option>
+        {municipalUnits.map(unit => <option key={unit} value={unit}>{unit}</option>)}
+      </select>
+
+      {/* 3. Departments Slicer */}
+      <select 
+        className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer px-3 h-9 hover:bg-gray-50 transition-colors rounded-r-lg" 
+        value={biDeptFilter} 
+        onChange={(e) => setBiDeptFilter(e.target.value)}
+      >
+        <option value="All">All Departments</option>
+        {/* We dynamically add EA into the list to satisfy the IMU -> EA hierarchy requested */}
+        <option value="Enterprise Architecture (EA)">Enterprise Architecture (EA)</option>
+        {allDeptNames.map(name => <option key={name} value={name}>{name}</option>)}
+      </select>
+    </div>
+  );
+
   // --- LIVE PRESENTATION MODE ---
   if (isLiveMode) {
     return (
       <div className="min-h-screen bg-dashboard-bg overflow-y-auto custom-scrollbar">
         <div className="bg-white border-b border-border p-4 flex justify-between items-center mb-6 shadow-sm sticky top-0 z-50">
           <div className="flex items-center space-x-3">
-            <div className="p-2 bg-indigo-50 rounded-lg animate-pulse">
-              <Tv className="h-5 w-5 text-indigo-600" />
+            <div className="p-2 bg-success rounded-lg animate-pulse">
+              <Monitor className="h-5 w-5 text-white" />
             </div>
             <div>
               <h1 className="text-lg font-bold text-metric-value leading-tight">Executive Presentation Mode</h1>
@@ -203,15 +296,8 @@ const Index = () => {
           </div>
           
           {role !== 'StandardUser' && (
-            <div className="flex items-center space-x-4 ml-8">
-              <select className="bg-gray-50 border border-gray-200 p-1.5 rounded-md text-xs font-semibold text-metric-value outline-none cursor-pointer" value={biSystemFilter} onChange={(e) => setBiSystemFilter(e.target.value)}>
-                <option value="All">All Systems</option>
-                {allSystemNames.map(name => <option key={name} value={name}>{name}</option>)}
-              </select>
-              <select className="bg-gray-50 border border-gray-200 p-1.5 rounded-md text-xs font-semibold text-metric-value outline-none cursor-pointer" value={biDeptFilter} onChange={(e) => setBiDeptFilter(e.target.value)}>
-                <option value="All">All Departments</option>
-                {allDeptNames.map(name => <option key={name} value={name}>{name}</option>)}
-              </select>
+            <div className="flex items-center ml-8">
+              {renderTripleTierFilters()}
             </div>
           )}
 
@@ -221,7 +307,6 @@ const Index = () => {
         </div>
         <div className="max-w-[1600px] mx-auto px-6 pb-8">
           {renderDashboardContent()}
-          {/* <-- Footer naturally follows the content here too --> */}
           <div className="mt-8">
             <Footer />
           </div>
@@ -242,8 +327,8 @@ const Index = () => {
               <Monitor className="h-5 w-5 text-white" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-gray-900 tracking-tight">AppManager</h1>
-              <p className="text-[9px] text-gray-500 uppercase tracking-widest font-semibold mt-0.5">Analytics OS</p>
+              <h1 className="text-xl font-bold text-gray-900 tracking-tight">Smart Analytics</h1>
+              <p className="text-[9px] text-gray-500 uppercase tracking-widest font-semibold mt-0.5">OS Analytics Manager</p>
             </div>
           </div>
         </div>
@@ -292,37 +377,39 @@ const Index = () => {
         <header className="h-20 bg-white border-b border-border px-8 flex items-center justify-between shrink-0 shadow-sm z-0">
           
           <div className="flex items-center space-x-6 flex-1">
-            <h2 className="text-lg font-bold text-gray-900 capitalize tracking-tight min-w-max">
-              {activeTab === 'users' ? 'Identity Matrix' : activeTab.replace('-', ' ')}
-            </h2>
+            {/* FIX: Title disappears when on Dashboard, letting Slicers take center stage */}
+            {activeTab !== 'dashboard' && (
+              <h2 className="text-lg font-bold text-gray-900 capitalize tracking-tight min-w-max">
+                {activeTab === 'users' ? 'Identity Matrix' : activeTab.replace('-', ' ')}
+              </h2>
+            )}
             
             {activeTab === 'dashboard' && role !== 'StandardUser' && (
-              <div className="hidden lg:flex items-center space-x-3 bg-gray-50 border border-gray-200 px-3 py-1.5 rounded-lg ml-4">
-                <Filter className="h-4 w-4 text-gray-400" />
-                <select className="bg-transparent text-sm font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-300 pr-3" value={biSystemFilter} onChange={(e) => setBiSystemFilter(e.target.value)}>
-                  <option value="All">All Systems</option>
-                  {allSystemNames.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
-                <select className="bg-transparent text-sm font-semibold text-gray-700 outline-none cursor-pointer pl-3" value={biDeptFilter} onChange={(e) => setBiDeptFilter(e.target.value)}>
-                  <option value="All">All Departments</option>
-                  {allDeptNames.map(name => <option key={name} value={name}>{name}</option>)}
-                </select>
+              <div>
+                {renderTripleTierFilters()}
               </div>
             )}
           </div>
 
           <div className="flex items-center space-x-3 shrink-0">
             {activeTab === 'dashboard' && (
-              <Button onClick={() => setIsLiveMode(true)} variant="outline" size="sm" className="bg-success border-success-200 text-slate-200 hover:bg-success-50 hover:text-white-900 shadow-sm font-semibold">
-                 Live Dashboard
+              <Button 
+                onClick={() => setIsLiveMode(true)} 
+                variant="outline" 
+                size="sm" 
+                className="inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 h-9 rounded-md px-3 bg-success hover:bg-green-500 text-white shadow-sm transition-colors duration-200 border-none"
+              >
+                <Monitor className="h-4 w-4 mr-2 text-white" /> Live Dashboard
               </Button>
             )}
             <div className="h-6 w-px bg-gray-200 mx-1"></div>
-            <Button onClick={() => {}} variant="outline" size="icon" className="bg-white border-gray-200 text-gray-500 hover:text-gray-00 shadow-sm h-9 w-9" title="Export Data">
+            
+            <Button onClick={handleExportData} variant="outline" size="icon" className="bg-white border-gray-200 text-gray-500 hover:text-gray-900 shadow-sm h-9 w-9" title="Export Audit CSV">
               <Download className="h-4 w-4" />
             </Button>
-            <Button onClick={refreshAllData} variant="outline" size="icon" className="bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900 shadow-sm h-9 w-9" title="Refresh Engine">
-              <RefreshCw className="h-4 w-4" />
+            
+            <Button onClick={refreshAllData} disabled={isLoading} variant="outline" size="icon" className="bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900 shadow-sm h-9 w-9 disabled:opacity-50" title="Refresh Engine">
+              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin text-indigo-600' : ''}`} />
             </Button>
           </div>
         </header>
