@@ -1,15 +1,17 @@
 import React from 'react';
 
 const Footer = () => {
+  const currentYear = new Date().getFullYear();
+
   return (
     <footer className="w-full bg-dashboard-bg text-gray-400 p-4 mt-8">
       <div className="container mx-auto flex justify-center items-center text-center">
         <p className="text-sm">
-          AppManager - Smart Application & Subscription Analytics
+        Smart Analytics
           <br />
-          Optimize your digital life and save money
+          OS Analytics Manager
           <br />
-          &copy; 2025 AppManager. All rights reserved.
+          &copy; {currentYear} iLAMI Technologies. All rights reserved.
         </p>
       </div>
     </footer>

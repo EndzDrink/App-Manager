@@ -41,7 +41,7 @@ const Index = () => {
   const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
   const [deptDetails, setDeptDetails] = useState<any>(null);
 
-  // --- THE NEW TRIPLE-TIER BI FILTERS ---
+  // --- THE TRIPLE-TIER BI FILTERS ---
   const [biSystemFilter, setBiSystemFilter] = useState<string>("All");
   const [biUnitFilter, setBiUnitFilter] = useState<string>("All"); 
   const [biDeptFilter, setBiDeptFilter] = useState<string>("All"); 
@@ -110,13 +110,64 @@ const Index = () => {
     if(token) refreshAllData(); 
   }, [token]);
 
-  // --- BI DASHBOARD CALCULATION LOGIC ---
+  // ==========================================
+  // ⚡ SMART CASCADING FILTER ENGINE
+  // ==========================================
+  
   const allSystemNames = Array.from(new Set(systems.map(s => s.name)));
-  const allDeptNames = Array.from(new Set(users.map(u => u.department).filter(d => d !== 'Unassigned')));
+  const allDeptNames = Array.from(new Set([...users.map(u => u.department).filter(d => d !== 'Unassigned'), "Enterprise Architecture (EA)"]));
   
-  // Static Units for Municipal Demo Context
-  const municipalUnits = ["Information Management Unit (IMU)", "Water & Sanitation Unit", "Cleansing & Solid Waste (DSW)", "Metro Police Unit"];
+  const municipalUnits = ["Information Management Unit (IMU)", "Water & Sanitation Unit", "Metro Police Unit", "Parks & Recreation Unit"];
   
+  // Maps a department to its parent Unit
+  const getUnitForDept = (deptName: string) => {
+    if (!deptName) return "Other";
+    const lower = deptName.toLowerCase();
+    if (lower.includes("it") || lower.includes("architecture")) return "Information Management Unit (IMU)";
+    if (lower.includes("water") || lower.includes("sanitation")) return "Water & Sanitation Unit";
+    if (lower.includes("police")) return "Metro Police Unit";
+    if (lower.includes("park") || lower.includes("recreation")) return "Parks & Recreation Unit";
+    return "Other";
+  };
+
+  // 1. Calculate Available Units based on System Selection
+  const availableUnits = municipalUnits.filter(unit => {
+    if (biSystemFilter === "All") return true;
+    const sys = systems.find(s => s.name === biSystemFilter);
+    const deptsUsingSys = sys?.departments || [];
+    const validUnitsForSys = new Set(deptsUsingSys.map(getUnitForDept));
+    return validUnitsForSys.has(unit);
+  });
+
+  // 2. Calculate Available Departments based on System AND Unit Selection
+  const availableDepts = allDeptNames.filter(dept => {
+    // Filter by System
+    if (biSystemFilter !== "All") {
+      const sys = systems.find(s => s.name === biSystemFilter);
+      const deptsUsingSys = sys?.departments || [];
+      if (!deptsUsingSys.includes(dept)) return false;
+    }
+    // Filter by Unit
+    if (biUnitFilter !== "All") {
+      if (getUnitForDept(dept) !== biUnitFilter) return false;
+    }
+    return true;
+  });
+
+  // 3. Cascade Reset Handlers
+  const handleSystemChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setBiSystemFilter(e.target.value);
+    setBiUnitFilter("All"); // Reset children
+    setBiDeptFilter("All");
+  };
+
+  const handleUnitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    setBiUnitFilter(e.target.value);
+    setBiDeptFilter("All"); // Reset child
+  };
+
+  // ==========================================
+
   const filteredSubscriptions = subscriptions.filter(sub => biSystemFilter === "All" || sub.name === biSystemFilter);
   const filteredMonthlyCost = biSystemFilter === "All" ? monthlyCost : filteredSubscriptions.reduce((sum, sub) => sum + parseFloat(sub.price || 0), 0);
   const filteredRecommendations = biSystemFilter === "All" ? recommendations : recommendations.filter(rec => rec.title.includes(biSystemFilter));
@@ -124,7 +175,6 @@ const Index = () => {
   const percentUsed = budget > 0 ? (filteredMonthlyCost / budget) * 100 : 0;
   const costColor = percentUsed >= 100 ? "text-red-600" : percentUsed >= 80 ? "text-orange-500" : "text-green-600";
 
-  // --- CONTEXT-AWARE SMART EXPORT ---
   const handleExportData = () => {
     let csvContent = "";
     let filename = "";
@@ -201,7 +251,6 @@ const Index = () => {
       </div>
       
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-12 items-start">
-        {/* We pass biDeptFilter down to simulate the data filter for charts */}
         <WeeklyUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} />
         {role !== 'StandardUser' ? (
            <CategoryUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} />
@@ -233,54 +282,45 @@ const Index = () => {
     }
   };
 
-  // --- TRIPLE TIER RENDER FOR HEADERS ---
+  // --- TRIPLE TIER SMART SLICERS UI ---
   const renderTripleTierFilters = () => (
     <div className="hidden lg:flex items-center bg-white border border-gray-200 rounded-lg shadow-sm">
       <div className="px-3 text-gray-400 border-r border-gray-100 flex items-center bg-gray-50/50 rounded-l-lg h-9">
         <Filter className="h-4 w-4" />
       </div>
       
-      {/* 1. Systems Slicer */}
+      {/* 1. Systems Slicer (Parent) */}
       <select 
-        className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-100 px-3 h-9 hover:bg-gray-50 transition-colors" 
+        className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-100 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
         value={biSystemFilter} 
-        onChange={(e) => setBiSystemFilter(e.target.value)}
+        onChange={handleSystemChange}
       >
         <option value="All">All Systems</option>
         {allSystemNames.map(name => <option key={name} value={name}>{name}</option>)}
       </select>
 
-      {/* 2. Units Slicer */}
+      {/* 2. Units Slicer (Child) */}
       <select 
-        className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-100 px-3 h-9 hover:bg-gray-50 transition-colors" 
+        className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-100 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
         value={biUnitFilter} 
-        onChange={(e) => {
-          setBiUnitFilter(e.target.value);
-          // If they select IMU, auto-filter departments to EA as an example
-          if(e.target.value === "Information Management Unit (IMU)") {
-            setBiDeptFilter("Enterprise Architecture (EA)");
-          }
-        }}
+        onChange={handleUnitChange}
       >
         <option value="All">All Units</option>
-        {municipalUnits.map(unit => <option key={unit} value={unit}>{unit}</option>)}
+        {availableUnits.map(unit => <option key={unit} value={unit}>{unit}</option>)}
       </select>
 
-      {/* 3. Departments Slicer */}
+      {/* 3. Departments Slicer (Grandchild) */}
       <select 
-        className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer px-3 h-9 hover:bg-gray-50 transition-colors rounded-r-lg" 
+        className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer px-3 h-9 hover:bg-gray-50 transition-colors rounded-r-lg max-w-[200px]" 
         value={biDeptFilter} 
         onChange={(e) => setBiDeptFilter(e.target.value)}
       >
         <option value="All">All Departments</option>
-        {/* We dynamically add EA into the list to satisfy the IMU -> EA hierarchy requested */}
-        <option value="Enterprise Architecture (EA)">Enterprise Architecture (EA)</option>
-        {allDeptNames.map(name => <option key={name} value={name}>{name}</option>)}
+        {availableDepts.map(name => <option key={name} value={name}>{name}</option>)}
       </select>
     </div>
   );
 
-  // --- LIVE PRESENTATION MODE ---
   if (isLiveMode) {
     return (
       <div className="min-h-screen bg-dashboard-bg overflow-y-auto custom-scrollbar">
@@ -315,11 +355,9 @@ const Index = () => {
     );
   }
 
-  // --- STANDARD ENTERPRISE APP SHELL ---
   return (
     <div className="flex h-screen bg-dashboard-bg overflow-hidden">
       
-      {/* LEFT SIDEBAR NAVIGATION */}
       <aside className="w-64 bg-white border-r border-border flex flex-col shrink-0 shadow-sm z-10">
         <div className="h-20 flex items-center px-6 border-b border-border">
           <div className="flex items-center space-x-3">
@@ -370,14 +408,11 @@ const Index = () => {
         </div>
       </aside>
 
-      {/* MAIN CONTENT AREA */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden bg-[#f8fafc]">
         
-        {/* TOP HEADER */}
         <header className="h-20 bg-white border-b border-border px-8 flex items-center justify-between shrink-0 shadow-sm z-0">
           
           <div className="flex items-center space-x-6 flex-1">
-            {/* FIX: Title disappears when on Dashboard, letting Slicers take center stage */}
             {activeTab !== 'dashboard' && (
               <h2 className="text-lg font-bold text-gray-900 capitalize tracking-tight min-w-max">
                 {activeTab === 'users' ? 'Identity Matrix' : activeTab.replace('-', ' ')}
