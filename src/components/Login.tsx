@@ -4,7 +4,6 @@ import { Button } from "@/components/ui/button";
 import { Monitor, Lock } from "lucide-react";
 
 // --- DYNAMIC API URL INJECTION ---
-// This ensures your phone knows to look at Render.com instead of itself.
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 interface LoginProps {
