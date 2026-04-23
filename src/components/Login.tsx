@@ -3,6 +3,10 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Monitor, Lock } from "lucide-react";
 
+// --- DYNAMIC API URL INJECTION ---
+// This ensures your phone knows to look at Render.com instead of itself.
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
 interface LoginProps {
   onLoginSuccess: (token: string, role: string) => void;
 }
@@ -19,7 +23,8 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setError('');
 
     try {
-      const res = await fetch('http://localhost:3000/api/auth/login', {
+      // FIX: Changed hardcoded localhost to the dynamic API_URL
+      const res = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password })
@@ -32,7 +37,9 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         setError(data.error || 'Login failed');
       }
     } catch (err) {
+      // This is the error you were seeing on your phone!
       setError('Network error. Ensure server is running.');
+      console.error("Login Error:", err);
     } finally {
       setIsLoading(false);
     }
