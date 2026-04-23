@@ -2,20 +2,29 @@ import { useState, useEffect } from "react";
 import { Card } from "@/components/ui/card";
 import { PieChart, Loader2 } from "lucide-react";
 
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
 interface CategoryData {
   category: string;
   time: string;
   percentage: number;
 }
 
-export const CategoryUsageChart = () => {
+interface CategoryUsageChartProps {
+  systemFilter?: string;
+  deptFilter?: string;
+}
+
+export const CategoryUsageChart = ({ systemFilter = 'All', deptFilter = 'All' }: CategoryUsageChartProps) => {
   const [categoryData, setCategoryData] = useState<CategoryData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     const fetchCategoryUsage = async () => {
+      setIsLoading(true);
       try {
-        const response = await fetch('http://localhost:3000/api/metrics/usage/category');
+        const response = await fetch(`${API_URL}/api/metrics/usage/category?system=${encodeURIComponent(systemFilter)}&dept=${encodeURIComponent(deptFilter)}`);
+        
         if (response.ok) {
           const data = await response.json();
           
@@ -47,7 +56,7 @@ export const CategoryUsageChart = () => {
     };
 
     fetchCategoryUsage();
-  }, []);
+  }, [systemFilter, deptFilter]);
 
   return (
     <Card className="p-6 bg-metric-card border border-border shadow-sm">
@@ -60,7 +69,7 @@ export const CategoryUsageChart = () => {
       
       <div className="space-y-4">
         {categoryData.length === 0 && !isLoading ? (
-          <p className="text-sm text-metric-label italic">No category data found.</p>
+          <p className="text-sm text-metric-label italic">No category data found for these filters.</p>
         ) : (
           categoryData.map((data, index) => (
             <div key={index} className="flex items-center justify-between">
