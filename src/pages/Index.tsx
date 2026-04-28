@@ -282,7 +282,7 @@ const Index = () => {
   const visibleNavItems = navItems.filter(item => item.roles.includes(role));
 
   const renderDashboardContent = () => (
-    <div className="animate-in fade-in duration-500">
+    <div className="animate-in fade-in duration-500 pb-12">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <MetricCard icon={<Server className="h-5 w-5" />} title={role === 'StandardUser' ? "Approved Systems" : "Filtered Systems"} value={biSystemFilter === "All" ? systems.length.toString() : "1"} subtitle={role === 'StandardUser' ? "Available in IT Catalog" : biSystemFilter === "All" ? "Org-wide Deployments" : `Isolated View`} />
         <MetricCard icon={<CreditCard className="h-5 w-5" />} title={role === 'StandardUser' ? "My Active Tools" : "Active Licenses"} value={role === 'StandardUser' ? "2" : filteredSubscriptions.length.toString()} subtitle={role === 'StandardUser' ? "Assigned to your account" : biSystemFilter === "All" ? "Procured seats" : `Seats for ${biSystemFilter}`} />
@@ -294,7 +294,7 @@ const Index = () => {
         )}
       </div>
       
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-12 items-stretch">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
         <div className="flex flex-col h-full min-h-[450px] w-full">
           <WeeklyUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} onSaveReport={handleSaveReportToArchive} />
         </div>
@@ -307,10 +307,10 @@ const Index = () => {
              />
            </div>
         ) : (
-          <div className="bg-white p-6 rounded-xl border border-border shadow-sm flex flex-col justify-center items-center text-center h-full min-h-[450px] w-full">
-            <h3 className="font-semibold text-metric-value mb-2">Need a new Enterprise System?</h3>
-            <p className="text-sm text-metric-label mb-4">Check the Systems tab for approved software, or contact PMO to request a new license.</p>
-            <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors">Request Procurement</button>
+          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-center items-center text-center h-full min-h-[450px] w-full">
+            <h3 className="font-semibold text-gray-900 mb-2">Need a new Enterprise System?</h3>
+            <p className="text-sm text-gray-500 mb-4">Check the Systems tab for approved software, or contact PMO to request a new license.</p>
+            <button className="px-4 py-2 bg-blue-900 text-yellow-400 rounded-md text-sm font-bold hover:bg-blue-800 transition-colors">Request Procurement</button>
           </div>
         )}
       </div>
@@ -347,12 +347,12 @@ const Index = () => {
 
   const renderTripleTierFilters = () => (
     <div className="hidden lg:flex items-center bg-white border border-gray-200 rounded-lg shadow-sm">
-      <div className="px-3 text-gray-400 border-r border-gray-100 flex items-center bg-gray-50/50 rounded-l-lg h-9">
+      <div className="px-3 text-gray-500 border-r border-gray-200 flex items-center bg-gray-50 rounded-l-lg h-9">
         <Filter className="h-4 w-4" />
       </div>
       
       <select 
-        className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-100 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
+        className="bg-transparent text-xs font-semibold text-blue-900 outline-none cursor-pointer border-r border-gray-200 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
         value={biSystemFilter} 
         onChange={handleSystemChange}
       >
@@ -361,7 +361,7 @@ const Index = () => {
       </select>
 
       <select 
-        className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-100 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
+        className="bg-transparent text-xs font-semibold text-blue-900 outline-none cursor-pointer border-r border-gray-200 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
         value={biUnitFilter} 
         onChange={handleUnitChange}
       >
@@ -370,7 +370,7 @@ const Index = () => {
       </select>
 
       <select 
-        className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer px-3 h-9 hover:bg-gray-50 transition-colors rounded-r-lg max-w-[200px]" 
+        className="bg-transparent text-xs font-semibold text-blue-900 outline-none cursor-pointer px-3 h-9 hover:bg-gray-50 transition-colors rounded-r-lg max-w-[200px]" 
         value={biDeptFilter} 
         onChange={handleDeptChange}
       >
@@ -380,18 +380,18 @@ const Index = () => {
     </div>
   );
 
-  // THIS IS THE FIX: The missing Live Mode render block has been restored here!
   if (isLiveMode) {
     return (
-      <div className="min-h-screen bg-dashboard-bg overflow-y-auto custom-scrollbar">
-        <div className="bg-white border-b border-border p-4 flex justify-between items-center mb-6 shadow-sm sticky top-0 z-50">
+      <div className="flex flex-col h-screen bg-gray-50 overflow-hidden">
+        {/* BRANDING: Live Mode header in solid Deep Blue with Yellow pulse */}
+        <div className="bg-blue-900 border-b border-blue-800 p-4 flex justify-between items-center shadow-md shrink-0 z-50">
           <div className="flex items-center space-x-3">
-            <div className="p-2 bg-success rounded-lg animate-pulse">
-              <Monitor className="h-5 w-5 text-white" />
+            <div className="p-2 bg-yellow-400 rounded-lg animate-pulse shadow-sm">
+              <Monitor className="h-5 w-5 text-blue-900" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-metric-value leading-tight">Executive Presentation Mode</h1>
-              <p className="text-[10px] text-metric-label uppercase tracking-wider font-semibold">Live Data Feed</p>
+              <h1 className="text-lg font-bold text-white leading-tight">Executive Presentation Mode</h1>
+              <p className="text-[10px] text-yellow-400 uppercase tracking-widest font-bold">Live Data Feed</p>
             </div>
           </div>
           
@@ -401,39 +401,42 @@ const Index = () => {
             </div>
           )}
 
-          <button onClick={() => setIsLiveMode(false)} className="flex items-center px-4 py-2 bg-red-50 text-red-600 rounded-md text-sm font-medium hover:bg-red-100 transition-colors border border-red-100 shadow-sm ml-auto">
+          <button onClick={() => setIsLiveMode(false)} className="flex items-center px-4 py-2 bg-white/10 text-white rounded-md text-sm font-medium hover:bg-white/20 transition-colors border border-white/20 shadow-sm ml-auto">
             <X className="h-4 w-4 mr-2" /> Exit
           </button>
         </div>
-        <div className="max-w-[1600px] mx-auto px-6 pb-8">
-          {renderDashboardContent()}
-          <div className="mt-8">
-            <Footer />
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
+          <div className="max-w-[1600px] mx-auto pb-4">
+            {renderDashboardContent()}
           </div>
         </div>
+
+        <Footer />
       </div>
     );
   }
 
   return (
-    <div className="flex h-screen bg-dashboard-bg overflow-hidden relative">
+    <div className="flex h-screen overflow-hidden relative bg-gray-50">
       
-      <aside className={`${isSidebarCollapsed ? 'w-20' : 'w-64'} bg-white border-r border-border flex flex-col shrink-0 shadow-sm z-10 transition-all duration-300 ease-in-out`}>
-        <div className="h-20 flex items-center justify-center px-4 border-b border-border">
+      <aside className={`${isSidebarCollapsed ? 'w-20' : 'w-64'} bg-white border-r border-gray-200 flex flex-col shrink-0 shadow-sm z-20 transition-all duration-300 ease-in-out relative`}>
+        <div className="h-20 flex items-center justify-center px-4 border-b border-gray-200 shrink-0">
           <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'space-x-3 w-full'}`}>
-            <div className="w-9 h-9 bg-gray-900 rounded-lg flex items-center justify-center shadow-sm shrink-0">
-              <Monitor className="h-5 w-5 text-white" />
+            {/* BRANDING: eThekwini Deep Blue Logo Block with Yellow Icon */}
+            <div className="w-9 h-9 bg-blue-900 rounded-lg flex items-center justify-center shadow-sm shrink-0">
+              <Monitor className="h-5 w-5 text-yellow-400" />
             </div>
             {!isSidebarCollapsed && (
               <div className="overflow-hidden whitespace-nowrap">
                 <h1 className="text-xl font-bold text-gray-900 tracking-tight">Smart Analytics</h1>
-                <p className="text-[9px] text-gray-500 uppercase tracking-widest font-semibold mt-0.5">OS Analytics Manager</p>
+                <p className="text-[9px] text-yellow-500 uppercase tracking-widest font-bold mt-0.5">Municipal OS</p>
               </div>
             )}
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-1 custom-scrollbar overflow-x-hidden">
+        <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-1 custom-scrollbar overflow-x-hidden bg-white">
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -442,32 +445,32 @@ const Index = () => {
                 key={item.id}
                 onClick={() => { setActiveTab(item.id); setSelectedDeptId(null); }}
                 title={isSidebarCollapsed ? item.label : undefined}
-                className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center' : 'space-x-3'} px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${
+                className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center' : 'space-x-3'} px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                   isActive 
-                  ? 'bg-indigo-50 text-indigo-700 shadow-sm border border-indigo-100/50' 
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  ? 'bg-blue-50/50 text-blue-900 font-bold border-l-4 border-yellow-400 rounded-l-none' 
+                  : 'text-gray-600 hover:bg-gray-50 hover:text-blue-900'
                 }`}
               >
-                <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-indigo-600' : 'text-gray-400'}`} />
+                <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-blue-900' : 'text-gray-400'}`} />
                 {!isSidebarCollapsed && <span className="whitespace-nowrap">{item.label}</span>}
               </button>
             );
           })}
         </nav>
 
-        <div className="p-4 border-t border-border bg-gray-50/50">
+        <div className="p-4 border-t border-gray-200 bg-white shrink-0">
           {!isSidebarCollapsed ? (
-            <div className="flex items-center space-x-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm mb-3 whitespace-nowrap overflow-hidden">
-              {role === 'SuperAdmin' ? <ShieldAlert className="h-4 w-4 text-green-600 shrink-0" /> : <Shield className="h-4 w-4 text-green-600 shrink-0" />}
+            <div className="flex items-center space-x-2 bg-blue-900 px-3 py-2 rounded-lg shadow-sm mb-3 whitespace-nowrap overflow-hidden">
+              {role === 'SuperAdmin' ? <ShieldAlert className="h-4 w-4 text-yellow-400 shrink-0" /> : <Shield className="h-4 w-4 text-yellow-400 shrink-0" />}
               <div className="truncate">
-                <p className="text-xs font-bold text-gray-900 truncate">Logged In</p>
-                <p className="text-[10px] font-semibold text-green-700 uppercase tracking-wider truncate">{role}</p>
+                <p className="text-xs font-medium text-blue-100 truncate">Logged In</p>
+                <p className="text-[10px] font-bold text-white uppercase tracking-wider truncate">{role}</p>
               </div>
             </div>
           ) : (
             <div className="flex justify-center mb-3">
-              <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-sm">
-                <ShieldAlert className="h-4 w-4 text-green-600" />
+              <div className="w-8 h-8 rounded-lg bg-blue-900 flex items-center justify-center shadow-sm">
+                <ShieldAlert className="h-4 w-4 text-yellow-400" />
               </div>
             </div>
           )}
@@ -478,16 +481,16 @@ const Index = () => {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col h-screen overflow-hidden bg-[#f8fafc]">
+      <main className="flex-1 flex flex-col h-screen overflow-hidden bg-gray-50 relative z-0">
         
-        <header className="h-20 bg-white border-b border-border px-8 flex items-center justify-between shrink-0 shadow-sm z-0">
+        <header className="h-20 bg-white border-b border-gray-200 px-8 flex items-center justify-between shrink-0 shadow-sm z-10">
           
           <div className="flex items-center space-x-4 flex-1">
             <Button 
               variant="ghost" 
               size="icon" 
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
-              className="text-gray-500 hover:bg-gray-100 rounded-full h-9 w-9 shrink-0"
+              className="text-gray-500 hover:bg-gray-100 hover:text-blue-900 rounded-full h-9 w-9 shrink-0 transition-colors"
             >
               <Menu className="h-5 w-5" />
             </Button>
@@ -506,49 +509,49 @@ const Index = () => {
           </div>
 
           <div className="flex items-center space-x-3 shrink-0">
-            {activeTab === 'dashboard' && (
-              <Button 
-                onClick={() => setIsLiveMode(true)} 
-                variant="outline" 
-                size="sm" 
-                className="inline-flex items-center justify-center h-9 rounded-md px-3 bg-success hover:bg-green-500 text-white shadow-sm transition-colors duration-200 border-none"
-              >
-                <Monitor className="h-4 w-4 mr-2 text-white" /> Live Dashboard
-              </Button>
-            )}
-            <div className="h-6 w-px bg-gray-200 mx-1"></div>
-            
-            <Button 
-              onClick={() => setIsArchiveOpen(true)} 
-              variant="outline" 
-              size="icon" 
-              className="bg-white border-gray-200 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 shadow-sm h-9 w-9 relative" 
-              title="Report Archive"
-            >
-              <Archive className="h-4 w-4" />
-              {savedReports.length > 0 && (
-                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold h-4 w-4 rounded-full flex items-center justify-center">
-                  {savedReports.length}
-                </span>
-              )}
-            </Button>
-            
-            <Button onClick={handleExportData} variant="outline" size="icon" className="bg-white border-gray-200 text-gray-500 hover:text-gray-900 shadow-sm h-9 w-9" title="Export Current View">
-              <Download className="h-4 w-4" />
-            </Button>
-            
-            <Button onClick={refreshAllData} disabled={isLoading} variant="outline" size="icon" className="bg-white border-gray-200 text-gray-500 hover:bg-gray-50 hover:text-gray-900 shadow-sm h-9 w-9 disabled:opacity-50" title="Refresh Engine">
-              <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin text-indigo-600' : ''}`} />
-            </Button>
+            <div className="flex items-center space-x-2">
+                
+                {/* BRANDING: Live Dashboard button is pure vibrant Yellow */}
+                {activeTab === 'dashboard' && (
+                  <Button 
+                    onClick={() => setIsLiveMode(true)} 
+                    className="bg-yellow-400 hover:bg-yellow-500 text-blue-900 font-bold shadow-sm h-9 px-4 mr-2"
+                  >
+                    <Monitor className="h-4 w-4 mr-2" /> Live Dashboard
+                  </Button>
+                )}
+
+                <Button 
+                  onClick={() => setIsArchiveOpen(true)} 
+                  variant="outline" 
+                  size="icon" 
+                  className="bg-white border-gray-200 text-blue-900 hover:bg-gray-50 hover:border-gray-300 shadow-sm h-9 w-9 relative" 
+                  title="Report Archive"
+                >
+                  <Archive className="h-4 w-4" />
+                  {savedReports.length > 0 && (
+                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold h-4 w-4 rounded-full flex items-center justify-center">
+                      {savedReports.length}
+                    </span>
+                  )}
+                </Button>
+
+                <Button onClick={handleExportData} variant="outline" size="icon" className="bg-white border-gray-200 text-gray-500 hover:text-blue-900 hover:bg-gray-50 shadow-sm h-9 w-9 transition-colors" title="Export Current View">
+                    <Download className="h-4 w-4" />
+                </Button>
+                
+                <Button onClick={refreshAllData} disabled={isLoading} variant="outline" size="icon" className="bg-white border-gray-200 text-gray-500 hover:text-blue-900 hover:bg-gray-50 shadow-sm h-9 w-9 disabled:opacity-50 transition-colors" title="Refresh Engine">
+                    <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin text-blue-900' : ''}`} />
+                </Button>
+            </div>
           </div>
         </header>
 
-        <div className="flex-1 overflow-y-auto p-8 custom-scrollbar relative">
+        <div className="flex-1 overflow-y-auto p-8 custom-scrollbar relative z-0">
           {renderTabContent()}
-          <div className="mt-8">
-            <Footer />
-          </div>
         </div>
+        
+        <Footer />
         
       </main>
 
@@ -557,7 +560,7 @@ const Index = () => {
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
             <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
               <div className="flex items-center text-gray-900">
-                <Archive className="h-5 w-5 mr-2 text-indigo-600" />
+                <Archive className="h-5 w-5 mr-2 text-blue-900" />
                 <h2 className="text-lg font-bold">Generated Reports Archive</h2>
               </div>
               <button onClick={() => setIsArchiveOpen(false)} className="text-gray-400 hover:text-gray-700 bg-white border border-gray-200 rounded-md p-1 shadow-sm transition-colors">
@@ -575,9 +578,10 @@ const Index = () => {
               ) : (
                 <div className="space-y-2 p-2">
                   {savedReports.map(report => (
-                    <div key={report.id} className="flex justify-between items-center p-4 bg-white border border-gray-200 rounded-lg shadow-sm hover:border-indigo-200 transition-colors group">
+                    <div key={report.id} className="flex justify-between items-center p-4 bg-white border border-gray-200 rounded-lg shadow-sm hover:border-blue-200 transition-colors group">
                       <div className="flex items-start">
-                        <FileText className="h-8 w-8 text-indigo-100 fill-indigo-600 mr-3 shrink-0" />
+                        {/* BRANDING: Yellow Archive Icons */}
+                        <FileText className="h-8 w-8 text-yellow-100 fill-yellow-400 mr-3 shrink-0" />
                         <div>
                           <p className="font-bold text-sm text-gray-800 truncate max-w-[300px] sm:max-w-md">{report.filename}</p>
                           <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-500 mt-1">{report.date}</p>
@@ -587,7 +591,7 @@ const Index = () => {
                         onClick={() => handleReDownload(report.filename, report.content)} 
                         variant="outline" 
                         size="sm"
-                        className="bg-white text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 border-gray-200 shadow-sm shrink-0"
+                        className="bg-white text-blue-900 hover:bg-blue-50 hover:border-blue-200 border-gray-200 shadow-sm shrink-0"
                       >
                         <Download className="h-3.5 w-3.5 sm:mr-2" />
                         <span className="hidden sm:inline">Download</span>

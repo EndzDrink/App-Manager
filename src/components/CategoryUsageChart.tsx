@@ -1,22 +1,65 @@
 import React, { useEffect, useState } from 'react';
 import { Card } from "@/components/ui/card";
 import { Clock, AlertCircle, Activity, PieChart as PieIcon, ExternalLink } from 'lucide-react';
-import { PieChart, Pie, Cell, Tooltip as RechartsTooltip, ResponsiveContainer, Legend } from 'recharts';
+import { PieChart, Pie, Cell, ResponsiveContainer, Sector } from 'recharts';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 interface CategoryUsageChartProps {
   systemFilter: string;
   deptFilter: string;
-  // NEW: The function that will tell the main dashboard to switch tabs
   onNavigateToRecommendations?: () => void; 
 }
+
+// --- NEW: Custom Active Shape for the Pie Chart ---
+// This draws the pop-out slice, the connecting line, and the data labels.
+const renderActiveShape = (props: any) => {
+  const RADIAN = Math.PI / 180;
+  const { cx, cy, midAngle, innerRadius, outerRadius, startAngle, endAngle, fill, payload, percent, value } = props;
+  const sin = Math.sin(-RADIAN * midAngle);
+  const cos = Math.cos(-RADIAN * midAngle);
+  const sx = cx + (outerRadius + 10) * cos;
+  const sy = cy + (outerRadius + 10) * sin;
+  const mx = cx + (outerRadius + 25) * cos;
+  const my = cy + (outerRadius + 25) * sin;
+  const ex = mx + (cos >= 0 ? 1 : -1) * 22;
+  const ey = my;
+  const textAnchor = cos >= 0 ? 'start' : 'end';
+
+  return (
+    <g>
+      {/* Category Name in the center hole */}
+      <text x={cx} y={cy} dy={4} textAnchor="middle" fill="#1e3a8a" className="font-bold text-xs uppercase tracking-wider">
+        {payload.category.length > 12 ? payload.category.substring(0, 10) + '...' : payload.category}
+      </text>
+      
+      {/* The popped-out slice */}
+      <Sector cx={cx} cy={cy} innerRadius={innerRadius} outerRadius={outerRadius + 8} startAngle={startAngle} endAngle={endAngle} fill={fill} />
+      <Sector cx={cx} cy={cy} startAngle={startAngle} endAngle={endAngle} innerRadius={outerRadius + 10} outerRadius={outerRadius + 14} fill={fill} />
+      
+      {/* The connecting line */}
+      <path d={`M${sx},${sy}L${mx},${my}L${ex},${ey}`} stroke={fill} fill="none" strokeWidth={2} />
+      <circle cx={ex} cy={ey} r={3} fill={fill} stroke="none" />
+      
+      {/* Data Labels (Minutes and Percentage) */}
+      <text x={ex + (cos >= 0 ? 1 : -1) * 12} y={ey} textAnchor={textAnchor} fill="#1e3a8a" className="font-bold text-xs">
+        {`${value} mins`}
+      </text>
+      <text x={ex + (cos >= 0 ? 1 : -1) * 12} y={ey} dy={16} textAnchor={textAnchor} fill="#64748b" className="text-[11px] font-semibold">
+        {`(${(percent * 100).toFixed(1)}%)`}
+      </text>
+    </g>
+  );
+};
+
 
 export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFilter, deptFilter, onNavigateToRecommendations }) => {
   const [data, setData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  
   const [chartType, setChartType] = useState<'list' | 'pie'>('list');
+  
+  // NEW: State to track which slice is currently hovered/active
+  const [activeIndex, setActiveIndex] = useState<number>(0);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -29,6 +72,7 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
         if (res.ok) {
           const rawData = await res.json();
           setData(rawData);
+          setActiveIndex(0); // Reset hover state on fresh data
         }
       } catch (err) {
         console.error("Failed to fetch category data", err);
@@ -55,58 +99,37 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
     };
   }).sort((a, b) => b.active - a.active); 
 
-  const pieColorsActive = ['#4f46e5', '#6366f1', '#818cf8', '#a5b4fc', '#c7d2fe', '#e0e7ff'];
+  // BRANDING: eThekwini Palette
+  const pieColorsActive = ['#1e3a8a', '#0ea5e9', '#facc15', '#1d4ed8', '#7dd3fc', '#eab308'];
 
-  // --- THE REAL NAVIGATION TRIGGER ---
   const handleEAFlagClick = () => {
-    if (onNavigateToRecommendations) {
-      onNavigateToRecommendations();
-    }
+    if (onNavigateToRecommendations) onNavigateToRecommendations();
   };
 
-  const CustomPieTooltip = ({ active, payload }: any) => {
-    if (active && payload && payload.length) {
-      const data = payload[0].payload;
-      return (
-        <div className="bg-white p-3 border border-gray-200 shadow-xl rounded-xl pointer-events-none">
-          <p className="font-bold text-gray-800 border-b border-gray-100 pb-1 mb-2">{data.category}</p>
-          <p className="text-xs text-indigo-700 font-semibold">{data.active} minutes actively used</p>
-        </div>
-      );
-    }
-    return null;
+  const toggleChartType = () => {
+    setChartType(prev => prev === 'list' ? 'pie' : 'list');
   };
 
   return (
-    <Card className="flex flex-col h-[450px] bg-white border border-border shadow-sm rounded-xl overflow-hidden">
+    <Card className="flex flex-col h-[450px] bg-white border border-gray-200 shadow-sm rounded-xl overflow-hidden">
       
       <div className="p-4 border-b border-gray-100 shrink-0 bg-white z-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div>
-          <h3 className="text-sm font-bold text-gray-800 flex items-center tracking-wide">
-            {chartType === 'list' ? <Activity className="h-4 w-4 mr-2 text-indigo-600" /> : <PieIcon className="h-4 w-4 mr-2 text-indigo-600" />}
-            Category Utilization
-          </h3>
-          <p className="text-xs text-gray-500 mt-1">Audit of active usage vs inactive capacity</p>
+        <div className="flex items-center">
+          <button 
+            onClick={toggleChartType} 
+            className="mr-3 p-2 bg-white hover:bg-blue-50 rounded-lg border border-gray-200 shadow-sm text-blue-800 transition-all group" 
+            title="Click to change chart style"
+          >
+            {chartType === 'list' && <Activity className="h-4 w-4 group-hover:scale-110 transition-transform" />}
+            {chartType === 'pie' && <PieIcon className="h-4 w-4 group-hover:scale-110 transition-transform" />}
+          </button>
+          <div>
+            <h3 className="text-sm font-bold text-gray-900 tracking-tight">Category Utilization</h3>
+            <p className="text-xs text-gray-500 mt-0.5">Audit of active usage vs inactive capacity</p>
+          </div>
         </div>
         
         <div className="flex items-center gap-2">
-          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-lg p-1 shadow-inner">
-            <button 
-              onClick={() => setChartType('list')}
-              className={`p-1.5 rounded-md transition-all ${chartType === 'list' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-              title="View as List"
-            >
-              <Activity className="h-3.5 w-3.5" />
-            </button>
-            <button 
-              onClick={() => setChartType('pie')}
-              className={`p-1.5 rounded-md transition-all ${chartType === 'pie' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400 hover:text-gray-600'}`}
-              title="View as Pie Chart"
-            >
-              <PieIcon className="h-3.5 w-3.5" />
-            </button>
-          </div>
-
           <button 
             onClick={handleEAFlagClick}
             className="bg-red-50 hover:bg-red-100 hover:shadow-sm text-red-600 border border-red-200 text-[10px] font-bold px-2.5 py-1.5 rounded-md flex items-center transition-all group cursor-pointer"
@@ -122,7 +145,7 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
       <div className="flex-1 p-4 overflow-y-auto custom-scrollbar bg-gray-50/30">
         {isLoading ? (
           <div className="h-full flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-900"></div>
           </div>
         ) : processedData.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-gray-400">
@@ -131,28 +154,55 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
           </div>
         ) : chartType === 'pie' ? (
           
-          <div className="h-full w-full min-h-[250px] pb-4">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={processedData}
-                  dataKey="active"
-                  nameKey="category"
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={80}
-                  paddingAngle={2}
-                  animationDuration={800}
+          <div className="h-full w-full flex flex-col pb-2">
+            {/* The Pie Chart Area */}
+            <div className="flex-1 min-h-[220px]">
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    activeIndex={activeIndex}
+                    activeShape={renderActiveShape}
+                    data={processedData}
+                    dataKey="active"
+                    nameKey="category"
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={55}
+                    outerRadius={75}
+                    paddingAngle={3}
+                    animationDuration={800}
+                    onMouseEnter={(_, index) => setActiveIndex(index)}
+                  >
+                    {processedData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={pieColorsActive[index % pieColorsActive.length]} className="cursor-pointer outline-none" />
+                    ))}
+                  </Pie>
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+
+            {/* NEW: Interactive Custom Legend at the bottom */}
+            <div className="mt-4 pt-4 border-t border-gray-200 flex flex-wrap justify-center gap-2">
+              {processedData.map((entry, index) => (
+                <div
+                  key={`legend-${index}`}
+                  onMouseEnter={() => setActiveIndex(index)}
+                  className={`flex items-center px-3 py-1.5 rounded-full cursor-pointer transition-all duration-300 border ${
+                    activeIndex === index 
+                      ? 'bg-blue-50 border-blue-200 shadow-sm scale-105' 
+                      : 'bg-white border-gray-200 hover:bg-gray-50 opacity-70'
+                  }`}
                 >
-                  {processedData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={pieColorsActive[index % pieColorsActive.length]} />
-                  ))}
-                </Pie>
-                <RechartsTooltip content={<CustomPieTooltip />} />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '11px', fontWeight: 600 }} />
-              </PieChart>
-            </ResponsiveContainer>
+                  <div 
+                    className="w-2.5 h-2.5 rounded-full mr-2 shadow-sm" 
+                    style={{ backgroundColor: pieColorsActive[index % pieColorsActive.length] }}
+                  ></div>
+                  <span className={`text-[10px] uppercase tracking-wider ${activeIndex === index ? 'font-bold text-blue-900' : 'font-semibold text-gray-600'}`}>
+                    {entry.category}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
 
         ) : (
@@ -166,14 +216,14 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
                 <div key={index} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
                   <div className="flex justify-between items-center mb-2.5">
                     <span className="text-sm font-bold text-gray-900">{item.category}</span>
-                    <span className={`text-xs font-bold px-2 py-0.5 rounded bg-indigo-50 text-indigo-700`}>
+                    <span className={`text-xs font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-100`}>
                       {displayValue} mins used
                     </span>
                   </div>
                   
                   <div className={`w-full rounded-full h-2 mb-2 overflow-hidden flex bg-gray-100`}>
                     <div 
-                      className={`h-2 rounded-full bg-indigo-500 transition-all duration-1000 ease-out`} 
+                      className={`h-2 rounded-full bg-blue-800 transition-all duration-1000 ease-out`} 
                       style={{ width: `${displayPercent}%` }}
                     ></div>
                   </div>

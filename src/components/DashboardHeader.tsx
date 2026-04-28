@@ -30,7 +30,7 @@ export const DashboardHeader = ({
           <Monitor className="h-6 w-6 text-white" />
         </div>
         <div>
-          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">AppManager</h1>
+          <h1 className="text-2xl font-bold text-gray-900 tracking-tight">Smart Analytics Manager</h1>
           <p className="text-sm font-medium text-gray-500">Enterprise Asset & Capacity Analytics</p>
         </div>
       </div>

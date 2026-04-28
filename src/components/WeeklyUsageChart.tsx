@@ -1,14 +1,18 @@
 import React, { useEffect, useState } from 'react';
 import { Card } from "@/components/ui/card";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { BarChart as BarChartIcon, Calendar, Download } from 'lucide-react'; 
+import { 
+  BarChart, Bar, 
+  LineChart, Line, 
+  AreaChart, Area, 
+  XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, Legend, ResponsiveContainer 
+} from 'recharts';
+import { BarChart as BarChartIcon, LineChart as LineChartIcon, Activity, Calendar, Download } from 'lucide-react'; 
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 interface WeeklyUsageChartProps {
   systemFilter: string;
   deptFilter: string;
-  // NEW: Hook to send the report to the central Archive
   onSaveReport?: (filename: string, content: string) => void;
 }
 
@@ -17,6 +21,8 @@ export const WeeklyUsageChart: React.FC<WeeklyUsageChartProps> = ({ systemFilter
   const [isLoading, setIsLoading] = useState(true);
   const [timeframe, setTimeframe] = useState<string>('weekly');
   const [metricFocus, setMetricFocus] = useState<'both' | 'active' | 'idle'>('both');
+  
+  const [chartType, setChartType] = useState<'bar' | 'line' | 'area'>('bar');
 
   useEffect(() => {
     const fetchData = async () => {
@@ -78,10 +84,7 @@ export const WeeklyUsageChart: React.FC<WeeklyUsageChartProps> = ({ systemFilter
     const dateStamp = new Date().toISOString().split('T')[0];
     const filename = `Capacity_Audit_${systemFilter}_${timeframe}_${dateStamp}.csv`;
 
-    // Save to global archive
-    if (onSaveReport) {
-      onSaveReport(filename, csvContent);
-    }
+    if (onSaveReport) onSaveReport(filename, csvContent);
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -102,10 +105,10 @@ export const WeeklyUsageChart: React.FC<WeeklyUsageChartProps> = ({ systemFilter
       const utilPercent = total > 0 ? Math.round((activeUsage / total) * 100) : 0;
 
       return (
-        <div className="bg-white p-3 border border-gray-200 shadow-xl rounded-xl pointer-events-none min-w-[150px]">
+        <div className="bg-white p-3 border border-gray-200 shadow-xl rounded-xl pointer-events-none min-w-[150px] z-50">
           <p className="font-bold text-gray-800 mb-2 border-b border-gray-100 pb-1">{label}</p>
           <div className="space-y-1.5 text-xs">
-            <p className="flex justify-between items-center text-indigo-700 font-semibold">
+            <p className="flex justify-between items-center text-blue-800 font-semibold">
               <span>Active (mins):</span> <span className="ml-4">{activeUsage}</span>
             </p>
             <p className="flex justify-between items-center text-red-600 font-semibold">
@@ -121,28 +124,92 @@ export const WeeklyUsageChart: React.FC<WeeklyUsageChartProps> = ({ systemFilter
     return null;
   };
 
-  const getActiveColor = () => metricFocus === 'idle' ? '#e0e7ff' : '#4f46e5';
+  const getActiveColor = () => metricFocus === 'idle' ? '#dbeafe' : '#1e3a8a';
   const getIdleColor = () => metricFocus === 'active' ? '#fee2e2' : '#ef4444';
 
+  // Cycle through the chart types
+  const toggleChartType = () => {
+    if (chartType === 'bar') setChartType('line');
+    else if (chartType === 'line') setChartType('area');
+    else setChartType('bar');
+  };
+
+  const renderChartGraph = () => {
+    const commonProps = { data, margin: { top: 15, right: 10, left: -20, bottom: 0 } };
+
+    if (chartType === 'line') {
+      return (
+        <LineChart {...commonProps}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+          <XAxis dataKey="period_label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280', fontWeight: 600 }} dy={10} />
+          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280', fontWeight: 600 }} />
+          <RechartsTooltip content={<CustomTooltip />} />
+          <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 600, paddingTop: '15px' }} />
+          <Line type="monotone" dataKey="Active Usage" stroke={getActiveColor()} strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} animationDuration={800} />
+          <Line type="monotone" dataKey="Unused Capacity" stroke={getIdleColor()} strokeWidth={3} dot={{ r: 4, strokeWidth: 2 }} activeDot={{ r: 6 }} animationDuration={800} />
+        </LineChart>
+      );
+    }
+
+    if (chartType === 'area') {
+      return (
+        <AreaChart {...commonProps}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+          <XAxis dataKey="period_label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280', fontWeight: 600 }} dy={10} />
+          <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280', fontWeight: 600 }} />
+          <RechartsTooltip content={<CustomTooltip />} />
+          <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 600, paddingTop: '15px' }} />
+          <Area type="monotone" dataKey="Active Usage" stackId="1" stroke={getActiveColor()} fill={getActiveColor()} fillOpacity={0.7} animationDuration={800} />
+          <Area type="monotone" dataKey="Unused Capacity" stackId="1" stroke={getIdleColor()} fill={getIdleColor()} fillOpacity={0.7} animationDuration={800} />
+        </AreaChart>
+      );
+    }
+
+    return (
+      <BarChart {...commonProps}>
+        <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
+        <XAxis dataKey="period_label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280', fontWeight: 600 }} dy={10} />
+        <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280', fontWeight: 600 }} />
+        <RechartsTooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(30, 58, 138, 0.05)' }} />
+        <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 600, paddingTop: '15px' }} />
+        <Bar dataKey="Active Usage" stackId="a" fill={getActiveColor()} radius={[0, 0, 4, 4]} barSize={40} animationDuration={800} />
+        <Bar dataKey="Unused Capacity" stackId="a" fill={getIdleColor()} radius={[4, 4, 0, 0]} barSize={40} animationDuration={800} />
+      </BarChart>
+    );
+  };
+
   return (
-    <Card className="flex flex-col h-[450px] bg-white border border-border shadow-sm rounded-xl overflow-hidden relative">
+    <Card className="flex flex-col h-[450px] bg-white border border-gray-200 shadow-sm rounded-xl overflow-hidden relative">
       
       <div className="p-4 border-b border-gray-100 shrink-0 bg-white z-10 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <div>
-          <h3 className="text-sm font-bold text-gray-800 flex items-center tracking-wide">
-            <BarChartIcon className="h-4 w-4 mr-2 text-indigo-600" />
-            System Usage vs. Idle Time
-          </h3>
-          <p className="text-xs text-gray-500 mt-1">
-            {systemFilter !== 'All' ? `Tracking capacity for ${systemFilter}` : 'Overall enterprise utilization footprint'}
-          </p>
+        <div className="flex items-center">
+          
+          {/* THE NEW CLEAN SINGLE TOGGLE BUTTON */}
+          <button 
+            onClick={toggleChartType} 
+            className="mr-3 p-2 bg-white hover:bg-blue-50 rounded-lg border border-gray-200 shadow-sm text-blue-800 transition-all group" 
+            title="Click to change chart style"
+          >
+            {chartType === 'bar' && <BarChartIcon className="h-4 w-4 group-hover:scale-110 transition-transform" />}
+            {chartType === 'line' && <LineChartIcon className="h-4 w-4 group-hover:scale-110 transition-transform" />}
+            {chartType === 'area' && <Activity className="h-4 w-4 group-hover:scale-110 transition-transform" />}
+          </button>
+          
+          <div>
+            <h3 className="text-sm font-bold text-gray-900 tracking-tight">
+              Systems Usage
+            </h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {systemFilter !== 'All' ? `Tracking capacity for ${systemFilter}` : 'Overall enterprise utilization footprint'}
+            </p>
+          </div>
         </div>
 
         <div className="flex items-center gap-2">
-          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 shadow-inner transition-colors hover:border-indigo-300">
+          <div className="flex items-center bg-gray-50 border border-gray-200 rounded-lg px-2.5 py-1.5 shadow-inner transition-colors hover:border-blue-300">
             <Calendar className="h-3.5 w-3.5 text-gray-500 mr-2" />
             <select 
-              className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer hover:text-indigo-700 transition-colors"
+              className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer hover:text-blue-800 transition-colors"
               value={timeframe}
               onChange={(e) => setTimeframe(e.target.value)}
             >
@@ -157,7 +224,7 @@ export const WeeklyUsageChart: React.FC<WeeklyUsageChartProps> = ({ systemFilter
           <button 
             onClick={handleExportReport}
             disabled={isLoading || data.length === 0}
-            className="flex items-center justify-center bg-white border border-gray-200 text-gray-600 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg px-2.5 py-1.5 shadow-sm transition-colors disabled:opacity-50 text-xs font-semibold"
+            className="flex items-center justify-center bg-white border border-gray-200 text-gray-600 hover:text-blue-800 hover:bg-blue-50 rounded-lg px-2.5 py-1.5 shadow-sm transition-colors disabled:opacity-50 text-xs font-semibold"
             title="Export Capacity Audit Report"
           >
             <Download className="h-3.5 w-3.5 sm:mr-1.5" />
@@ -169,36 +236,28 @@ export const WeeklyUsageChart: React.FC<WeeklyUsageChartProps> = ({ systemFilter
       <div className="flex-1 p-4 pb-2 overflow-y-auto custom-scrollbar bg-gray-50/30">
         {isLoading ? (
           <div className="h-full flex items-center justify-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-800"></div>
           </div>
         ) : (
           <div className="h-[280px] min-w-[400px]">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={data} margin={{ top: 15, right: 10, left: -20, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#e5e7eb" />
-                <XAxis dataKey="period_label" axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280', fontWeight: 600 }} dy={10} />
-                <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 11, fill: '#6b7280', fontWeight: 600 }} />
-                <Tooltip content={<CustomTooltip />} cursor={{ fill: 'rgba(79, 70, 229, 0.05)' }} />
-                <Legend iconType="circle" wrapperStyle={{ fontSize: '12px', fontWeight: 600, paddingTop: '15px' }} />
-                <Bar dataKey="Active Usage" stackId="a" fill={getActiveColor()} radius={[0, 0, 4, 4]} barSize={40} animationDuration={800} />
-                <Bar dataKey="Unused Capacity" stackId="a" fill={getIdleColor()} radius={[4, 4, 0, 0]} barSize={40} animationDuration={800} />
-              </BarChart>
+              {renderChartGraph()}
             </ResponsiveContainer>
           </div>
         )}
       </div>
 
       <div className="px-4 py-3 border-t border-gray-100 bg-white shrink-0 flex justify-center">
-        <div className="flex items-center bg-gray-100 p-1 rounded-lg w-full max-w-sm border border-gray-200">
+        <div className="flex items-center bg-gray-100 p-1 rounded-lg w-full max-w-sm border border-gray-200 shadow-inner">
            <button
             onClick={() => setMetricFocus('both')}
-            className={`flex-1 text-[10px] uppercase tracking-wider font-bold py-1.5 rounded-md transition-all ${metricFocus === 'both' ? 'bg-white text-gray-800 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`flex-1 text-[10px] uppercase tracking-wider font-bold py-1.5 rounded-md transition-all ${metricFocus === 'both' ? 'bg-white text-gray-800 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-700'}`}
           >
             Combined
           </button>
           <button
             onClick={() => setMetricFocus('active')}
-            className={`flex-1 text-[10px] uppercase tracking-wider font-bold py-1.5 rounded-md transition-all ${metricFocus === 'active' ? 'bg-indigo-50 text-indigo-700 shadow-sm border border-indigo-100' : 'text-gray-500 hover:text-gray-700'}`}
+            className={`flex-1 text-[10px] uppercase tracking-wider font-bold py-1.5 rounded-md transition-all ${metricFocus === 'active' ? 'bg-blue-50 text-blue-800 shadow-sm border border-blue-100' : 'text-gray-500 hover:text-gray-700'}`}
           >
             Active Usage
           </button>
