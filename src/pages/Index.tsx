@@ -39,7 +39,7 @@ const Index = () => {
   const [trends, setTrends] = useState<any>(null);
   const [recommendations, setRecommendations] = useState<any[]>([]);
   const [monthlyCost, setMonthlyCost] = useState<number>(0);
-  const [budget, setBudget] = useState<number>(35000); 
+  const [budget, setBudget] = useState<number>(150000); 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   
   const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
@@ -76,12 +76,31 @@ const Index = () => {
   const refreshAllData = async () => {
     if (!token) return;
     setIsLoading(true);
-    await Promise.all([fetchMonthlyCost(), fetchSubscriptions(), fetchSystems(), fetchRecommendations(), fetchSettings(), fetchConnectors(), fetchUsers(), fetchAuditData(), fetchTrends()]);
-    setIsLoading(false);
+    try {
+      await Promise.all([
+        fetchMonthlyCost(), 
+        fetchSubscriptions(), 
+        fetchSystems(), 
+        fetchRecommendations(), 
+        fetchSettings(), 
+        fetchConnectors(), 
+        fetchUsers(), 
+        fetchAuditData(), 
+        fetchTrends()
+      ]);
+    } catch (error) {
+      console.error("Failed to sync engine:", error);
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   const handleUpdateBudget = async (nb: number) => {
-    await fetch(`${API_URL}/api/settings`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ monthly_budget: nb }) });
+    await fetch(`${API_URL}/api/settings`, { 
+      method: 'PUT', 
+      headers: { 'Content-Type': 'application/json' }, 
+      body: JSON.stringify({ monthly_budget: nb }) 
+    });
     setBudget(nb);
   };
 
@@ -94,7 +113,8 @@ const Index = () => {
   const handleDepartmentClick = async (id: number) => {
     const res = await fetch(`${API_URL}/api/departments/${id}/details`);
     if (res.ok) {
-      setDeptDetails(await res.json());
+      const details = await res.json();
+      setDeptDetails(details);
       setSelectedDeptId(id);
     }
   };
@@ -327,20 +347,25 @@ const Index = () => {
       case "admin": return role === 'SuperAdmin' ? <AdminTab onRefresh={refreshAllData} onExport={handleExportData} budget={budget} onUpdateBudget={handleUpdateBudget} connectors={connectors} onAddConnector={async () => {}} stats={{ totalApps: systems.length, activeSubscriptions: subscriptions.length, recommendations: recommendations.length, monthlyCost }} /> : <UnauthorizedView />;
       case "systems": return <AppsTab apps={systems} onAddApp={refreshAllData} />; 
       case "subscriptions": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? <SubscriptionsTab subscriptions={subscriptions} onAddSubscription={refreshAllData} /> : <UnauthorizedView />;
-      case "recommendations": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? (
+      case "audit": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? 
+        <AuditTab 
+            duplications={duplications} 
+            deptSpend={deptSpend} 
+            onDepartmentClick={handleDepartmentClick} 
+            systems={systems} 
+        /> : <UnauthorizedView />;
+      case "recommendations": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? 
         <RecommendationsTab 
-          recommendations={recommendations} 
-          onReclaim={handleReclaim} 
-          onInvestigate={(sysName) => {
-            setActiveTab('users');
-            setBiSystemFilter(sysName);
-            setBiUnitFilter('All');
-            setBiDeptFilter('All');
-          }}
-        />
-      ) : <UnauthorizedView />;
+            recommendations={recommendations} 
+            onReclaim={handleReclaim} 
+            onInvestigate={(sysName) => {
+                setActiveTab('users');
+                setBiSystemFilter(sysName);
+                setBiUnitFilter('All');
+                setBiDeptFilter('All');
+            }}
+        /> : <UnauthorizedView />;
       case "users": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? <UsersTab users={users} onRefresh={refreshAllData} /> : <UnauthorizedView />;
-      case "audit": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? <AuditTab duplications={duplications} deptSpend={deptSpend} onDepartmentClick={handleDepartmentClick} /> : <UnauthorizedView />;
       default: return renderDashboardContent();
     }
   };
@@ -383,7 +408,6 @@ const Index = () => {
   if (isLiveMode) {
     return (
       <div className="flex flex-col h-screen bg-gray-50 overflow-hidden">
-        {/* BRANDING: Live Mode header in solid Deep Blue with Yellow pulse */}
         <div className="bg-blue-900 border-b border-blue-800 p-4 flex justify-between items-center shadow-md shrink-0 z-50">
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-yellow-400 rounded-lg animate-pulse shadow-sm">
@@ -423,7 +447,6 @@ const Index = () => {
       <aside className={`${isSidebarCollapsed ? 'w-20' : 'w-64'} bg-white border-r border-gray-200 flex flex-col shrink-0 shadow-sm z-20 transition-all duration-300 ease-in-out relative`}>
         <div className="h-20 flex items-center justify-center px-4 border-b border-gray-200 shrink-0">
           <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'space-x-3 w-full'}`}>
-            {/* BRANDING: eThekwini Deep Blue Logo Block with Yellow Icon */}
             <div className="w-9 h-9 bg-blue-900 rounded-lg flex items-center justify-center shadow-sm shrink-0">
               <Monitor className="h-5 w-5 text-yellow-400" />
             </div>
@@ -482,9 +505,7 @@ const Index = () => {
       </aside>
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden bg-gray-50 relative z-0">
-        
         <header className="h-20 bg-white border-b border-gray-200 px-8 flex items-center justify-between shrink-0 shadow-sm z-10">
-          
           <div className="flex items-center space-x-4 flex-1">
             <Button 
               variant="ghost" 
@@ -510,8 +531,6 @@ const Index = () => {
 
           <div className="flex items-center space-x-3 shrink-0">
             <div className="flex items-center space-x-2">
-                
-                {/* BRANDING: Live Dashboard button is pure vibrant Yellow */}
                 {activeTab === 'dashboard' && (
                   <Button 
                     onClick={() => setIsLiveMode(true)} 
@@ -580,7 +599,6 @@ const Index = () => {
                   {savedReports.map(report => (
                     <div key={report.id} className="flex justify-between items-center p-4 bg-white border border-gray-200 rounded-lg shadow-sm hover:border-blue-200 transition-colors group">
                       <div className="flex items-start">
-                        {/* BRANDING: Yellow Archive Icons */}
                         <FileText className="h-8 w-8 text-yellow-100 fill-yellow-400 mr-3 shrink-0" />
                         <div>
                           <p className="font-bold text-sm text-gray-800 truncate max-w-[300px] sm:max-w-md">{report.filename}</p>
