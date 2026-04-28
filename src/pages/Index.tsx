@@ -14,7 +14,7 @@ import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
 import { 
   CreditCard, DollarSign, Lightbulb, TrendingUp, TrendingDown, Lock, Server, Filter, X, 
-  Monitor, ShieldAlert, Shield, User, LogOut, Download, RefreshCw, LayoutDashboard, Users, ShieldCheck, Settings
+  Monitor, ShieldAlert, Shield, User, LogOut, Download, RefreshCw, LayoutDashboard, Users, ShieldCheck, Settings, Menu, Archive, FileText
 } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -26,6 +26,10 @@ const Index = () => {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isLiveMode, setIsLiveMode] = useState<boolean>(false);
   
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
+  const [isArchiveOpen, setIsArchiveOpen] = useState<boolean>(false);
+  const [savedReports, setSavedReports] = useState<any[]>(JSON.parse(localStorage.getItem('ea_saved_reports') || '[]'));
+
   const [systems, setSystems] = useState<any[]>([]); 
   const [subscriptions, setSubscriptions] = useState<any[]>([]);
   const [connectors, setConnectors] = useState<any[]>([]);
@@ -35,13 +39,12 @@ const Index = () => {
   const [trends, setTrends] = useState<any>(null);
   const [recommendations, setRecommendations] = useState<any[]>([]);
   const [monthlyCost, setMonthlyCost] = useState<number>(0);
-  const [budget, setBudget] = useState<number>(2000);
+  const [budget, setBudget] = useState<number>(35000); 
   const [isLoading, setIsLoading] = useState<boolean>(true);
   
   const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
   const [deptDetails, setDeptDetails] = useState<any>(null);
 
-  // --- THE TRIPLE-TIER BI FILTERS ---
   const [biSystemFilter, setBiSystemFilter] = useState<string>("All");
   const [biUnitFilter, setBiUnitFilter] = useState<string>("All"); 
   const [biDeptFilter, setBiDeptFilter] = useState<string>("All"); 
@@ -110,68 +113,115 @@ const Index = () => {
     if(token) refreshAllData(); 
   }, [token]);
 
-  // ==========================================
-  // ⚡ SMART CASCADING FILTER ENGINE
-  // ==========================================
-  
-  const allSystemNames = Array.from(new Set(systems.map(s => s.name)));
-  const allDeptNames = Array.from(new Set([...users.map(u => u.department).filter(d => d !== 'Unassigned'), "Enterprise Architecture (EA)"]));
-  
+  const handleSaveReportToArchive = (filename: string, content: string) => {
+    const newReport = { id: Date.now(), filename, date: new Date().toLocaleString(), content };
+    const updatedReports = [newReport, ...savedReports].slice(0, 50); 
+    setSavedReports(updatedReports);
+    localStorage.setItem('ea_saved_reports', JSON.stringify(updatedReports));
+  };
+
+  const handleReDownload = (filename: string, content: string) => {
+    const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", filename);
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleClearArchive = () => {
+    setSavedReports([]);
+    localStorage.removeItem('ea_saved_reports');
+  };
+
   const municipalUnits = ["Information Management Unit (IMU)", "Water & Sanitation Unit", "Metro Police Unit", "Parks & Recreation Unit"];
+  const imuDepartments = ["Enterprise Architecture", "Applications/Dev", "Networks", "PMO", "Security", "GIS", "Admin", "Customer Service"];
   
-  // Maps a department to its parent Unit
   const getUnitForDept = (deptName: string) => {
-    if (!deptName) return "Other";
+    if (!deptName || deptName === 'Unassigned') return "Other";
+    if (imuDepartments.includes(deptName)) return "Information Management Unit (IMU)";
     const lower = deptName.toLowerCase();
-    if (lower.includes("it") || lower.includes("architecture")) return "Information Management Unit (IMU)";
     if (lower.includes("water") || lower.includes("sanitation")) return "Water & Sanitation Unit";
     if (lower.includes("police")) return "Metro Police Unit";
     if (lower.includes("park") || lower.includes("recreation")) return "Parks & Recreation Unit";
     return "Other";
   };
 
-  // 1. Calculate Available Units based on System Selection
-  const availableUnits = municipalUnits.filter(unit => {
-    if (biSystemFilter === "All") return true;
-    const sys = systems.find(s => s.name === biSystemFilter);
-    const deptsUsingSys = sys?.departments || [];
-    const validUnitsForSys = new Set(deptsUsingSys.map(getUnitForDept));
-    return validUnitsForSys.has(unit);
+  const allSystemNames = Array.from(new Set(systems.map(s => s.name))).sort();
+  const allDeptNames = Array.from(new Set(users.map(u => u.department).filter(d => d && d !== 'Unassigned'))).sort();
+
+  const availableSystems = allSystemNames.filter(sys => {
+    return users.some(u => {
+      const matchUnit = biUnitFilter === "All" || getUnitForDept(u.department) === biUnitFilter;
+      const matchDept = biDeptFilter === "All" || u.department === biDeptFilter;
+      const hasSys = u.assigned_systems?.some((s:any) => s.name === sys);
+      return matchUnit && matchDept && hasSys;
+    });
   });
 
-  // 2. Calculate Available Departments based on System AND Unit Selection
+  const availableUnits = municipalUnits.filter(unit => {
+    return users.some(u => {
+      const matchSys = biSystemFilter === "All" || u.assigned_systems?.some((s:any) => s.name === biSystemFilter);
+      const matchDept = biDeptFilter === "All" || u.department === biDeptFilter;
+      const isUnit = getUnitForDept(u.department) === unit;
+      return matchSys && matchDept && isUnit;
+    });
+  });
+
   const availableDepts = allDeptNames.filter(dept => {
-    // Filter by System
-    if (biSystemFilter !== "All") {
-      const sys = systems.find(s => s.name === biSystemFilter);
-      const deptsUsingSys = sys?.departments || [];
-      if (!deptsUsingSys.includes(dept)) return false;
+    return users.some(u => {
+      const matchSys = biSystemFilter === "All" || u.assigned_systems?.some((s:any) => s.name === biSystemFilter);
+      const matchUnit = biUnitFilter === "All" || getUnitForDept(u.department) === biUnitFilter;
+      const isDept = u.department === dept;
+      return matchSys && matchUnit && isDept;
+    });
+  });
+
+  const handleSystemChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setBiSystemFilter(val);
+    if (val !== "All") {
+      if (biUnitFilter !== "All" && !users.some(u => getUnitForDept(u.department) === biUnitFilter && u.assigned_systems?.some((s:any) => s.name === val))) setBiUnitFilter("All");
+      if (biDeptFilter !== "All" && !users.some(u => u.department === biDeptFilter && u.assigned_systems?.some((s:any) => s.name === val))) setBiDeptFilter("All");
     }
-    // Filter by Unit
-    if (biUnitFilter !== "All") {
-      if (getUnitForDept(dept) !== biUnitFilter) return false;
+  };
+
+  const handleUnitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setBiUnitFilter(val);
+    if (val !== "All") {
+      if (biDeptFilter !== "All" && getUnitForDept(biDeptFilter) !== val) setBiDeptFilter("All");
+      if (biSystemFilter !== "All" && !users.some(u => getUnitForDept(u.department) === val && u.assigned_systems?.some((s:any) => s.name === biSystemFilter))) setBiSystemFilter("All");
+    }
+  };
+
+  const handleDeptChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setBiDeptFilter(val);
+    if (val !== "All") {
+      const parentUnit = getUnitForDept(val);
+      if (biUnitFilter !== parentUnit) setBiUnitFilter(parentUnit); 
+      if (biSystemFilter !== "All" && !users.some(u => u.department === val && u.assigned_systems?.some((s:any) => s.name === biSystemFilter))) setBiSystemFilter("All");
+    }
+  };
+
+  const filteredSubscriptions = subscriptions.filter(sub => {
+    if (biSystemFilter !== "All" && sub.name !== biSystemFilter) return false;
+    if (biUnitFilter !== "All" || biDeptFilter !== "All") {
+       const userForSub = users.find(u => u.assigned_systems?.some((s:any) => s.name === sub.name && s.price === sub.price));
+       if (userForSub) {
+         if (biUnitFilter !== "All" && getUnitForDept(userForSub.department) !== biUnitFilter) return false;
+         if (biDeptFilter !== "All" && userForSub.department !== biDeptFilter) return false;
+       }
     }
     return true;
   });
 
-  // 3. Cascade Reset Handlers
-  const handleSystemChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setBiSystemFilter(e.target.value);
-    setBiUnitFilter("All"); // Reset children
-    setBiDeptFilter("All");
-  };
-
-  const handleUnitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setBiUnitFilter(e.target.value);
-    setBiDeptFilter("All"); // Reset child
-  };
-
-  // ==========================================
-
-  const filteredSubscriptions = subscriptions.filter(sub => biSystemFilter === "All" || sub.name === biSystemFilter);
-  const filteredMonthlyCost = biSystemFilter === "All" ? monthlyCost : filteredSubscriptions.reduce((sum, sub) => sum + parseFloat(sub.price || 0), 0);
+  const filteredMonthlyCost = filteredSubscriptions.reduce((sum, sub) => sum + parseFloat(sub.price || 0), 0);
   const filteredRecommendations = biSystemFilter === "All" ? recommendations : recommendations.filter(rec => rec.title.includes(biSystemFilter));
-
   const percentUsed = budget > 0 ? (filteredMonthlyCost / budget) * 100 : 0;
   const costColor = percentUsed >= 100 ? "text-red-600" : percentUsed >= 80 ? "text-orange-500" : "text-green-600";
 
@@ -183,26 +233,20 @@ const Index = () => {
     if (activeTab === 'systems') {
       const headers = ['System ID', 'System Name', 'Category', 'Date Added', 'Deployed Departments'];
       const rows = systems.map(app => [
-        app.id,
-        `"${app.name}"`, 
-        `"${app.category}"`, 
-        app.created_at, 
-        `"${app.departments?.join(', ') || 'None'}"`
+        app.id, `"${app.name}"`, `"${app.category}"`, app.created_at, `"${app.departments?.join(', ') || 'None'}"`
       ]);
       csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
       filename = `eThekwini_IT_Catalog_${dateStamp}.csv`;
     } else {
       const headers = ['System Name', 'Category', 'Monthly Cost (ZAR)', 'Assigned Project', 'Status'];
       const rows = filteredSubscriptions.map(sub => [
-        `"${sub.name}"`, 
-        `"${sub.category}"`, 
-        sub.price, 
-        `"${sub.project_name || 'Operational (No Project)'}"`, 
-        'Active'
+        `"${sub.name}"`, `"${sub.category}"`, sub.price, `"${sub.project_name || 'Operational (No Project)'}"`, 'Active'
       ]);
       csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
       filename = `Municipal_SaaS_Audit_${dateStamp}.csv`;
     }
+
+    handleSaveReportToArchive(filename, csvContent);
 
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
@@ -244,18 +288,26 @@ const Index = () => {
         <MetricCard icon={<CreditCard className="h-5 w-5" />} title={role === 'StandardUser' ? "My Active Tools" : "Active Licenses"} value={role === 'StandardUser' ? "2" : filteredSubscriptions.length.toString()} subtitle={role === 'StandardUser' ? "Assigned to your account" : biSystemFilter === "All" ? "Procured seats" : `Seats for ${biSystemFilter}`} />
         {role !== 'StandardUser' && (
           <>
-            <MetricCard icon={<DollarSign className="h-5 w-5" />} title={biSystemFilter === "All" ? "Total Burn" : "System Burn"} value={`ZAR ${filteredMonthlyCost.toFixed(2)}`} subtitle={<div className="flex items-center space-x-2"><span className={costColor}>{biSystemFilter === "All" ? `${percentUsed.toFixed(0)}% of budget` : 'Direct Cost'}</span>{biSystemFilter === "All" && trends && (<span className={`flex items-center text-[10px] font-bold ${parseFloat(trends.momChange) > 0 ? 'text-red-500' : 'text-green-500'}`}>{parseFloat(trends.momChange) > 0 ? <TrendingUp className="h-2 w-2 mr-0.5"/> : <TrendingDown className="h-2 w-2 mr-0.5"/>}{Math.abs(trends.momChange)}%</span>)}</div>} />
+            <MetricCard icon={<DollarSign className="h-5 w-5" />} title={biSystemFilter === "All" && biUnitFilter === "All" ? "Total Burn" : "Filtered Burn"} value={`ZAR ${filteredMonthlyCost.toFixed(2)}`} subtitle={<div className="flex items-center space-x-2"><span className={costColor}>{biSystemFilter === "All" ? `${percentUsed.toFixed(0)}% of budget` : 'Direct Cost'}</span>{biSystemFilter === "All" && trends && (<span className={`flex items-center text-[10px] font-bold ${parseFloat(trends.momChange) > 0 ? 'text-red-500' : 'text-green-500'}`}>{parseFloat(trends.momChange) > 0 ? <TrendingUp className="h-2 w-2 mr-0.5"/> : <TrendingDown className="h-2 w-2 mr-0.5"/>}{Math.abs(trends.momChange)}%</span>)}</div>} />
             <MetricCard icon={<Lightbulb className="h-5 w-5" />} title="Saving Ops" value={filteredRecommendations.length.toString()} subtitle={biSystemFilter === "All" ? "Optimization identified" : `Flags for ${biSystemFilter}`} />
           </>
         )}
       </div>
       
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-12 items-start">
-        <WeeklyUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} />
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pb-12 items-stretch">
+        <div className="flex flex-col h-full min-h-[450px] w-full">
+          <WeeklyUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} onSaveReport={handleSaveReportToArchive} />
+        </div>
         {role !== 'StandardUser' ? (
-           <CategoryUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} />
+           <div className="flex flex-col h-full min-h-[450px] w-full">
+             <CategoryUsageChart 
+               systemFilter={biSystemFilter} 
+               deptFilter={biDeptFilter} 
+               onNavigateToRecommendations={() => setActiveTab('recommendations')} 
+             />
+           </div>
         ) : (
-          <div className="bg-white p-6 rounded-lg border border-border shadow-sm flex flex-col justify-center items-center text-center">
+          <div className="bg-white p-6 rounded-xl border border-border shadow-sm flex flex-col justify-center items-center text-center h-full min-h-[450px] w-full">
             <h3 className="font-semibold text-metric-value mb-2">Need a new Enterprise System?</h3>
             <p className="text-sm text-metric-label mb-4">Check the Systems tab for approved software, or contact PMO to request a new license.</p>
             <button className="px-4 py-2 bg-blue-50 text-blue-600 rounded-md text-sm font-medium hover:bg-blue-100 transition-colors">Request Procurement</button>
@@ -275,31 +327,39 @@ const Index = () => {
       case "admin": return role === 'SuperAdmin' ? <AdminTab onRefresh={refreshAllData} onExport={handleExportData} budget={budget} onUpdateBudget={handleUpdateBudget} connectors={connectors} onAddConnector={async () => {}} stats={{ totalApps: systems.length, activeSubscriptions: subscriptions.length, recommendations: recommendations.length, monthlyCost }} /> : <UnauthorizedView />;
       case "systems": return <AppsTab apps={systems} onAddApp={refreshAllData} />; 
       case "subscriptions": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? <SubscriptionsTab subscriptions={subscriptions} onAddSubscription={refreshAllData} /> : <UnauthorizedView />;
+      case "recommendations": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? (
+        <RecommendationsTab 
+          recommendations={recommendations} 
+          onReclaim={handleReclaim} 
+          onInvestigate={(sysName) => {
+            setActiveTab('users');
+            setBiSystemFilter(sysName);
+            setBiUnitFilter('All');
+            setBiDeptFilter('All');
+          }}
+        />
+      ) : <UnauthorizedView />;
       case "users": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? <UsersTab users={users} onRefresh={refreshAllData} /> : <UnauthorizedView />;
-      case "recommendations": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? <RecommendationsTab recommendations={recommendations} onReclaim={handleReclaim} /> : <UnauthorizedView />;
       case "audit": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? <AuditTab duplications={duplications} deptSpend={deptSpend} onDepartmentClick={handleDepartmentClick} /> : <UnauthorizedView />;
       default: return renderDashboardContent();
     }
   };
 
-  // --- TRIPLE TIER SMART SLICERS UI ---
   const renderTripleTierFilters = () => (
     <div className="hidden lg:flex items-center bg-white border border-gray-200 rounded-lg shadow-sm">
       <div className="px-3 text-gray-400 border-r border-gray-100 flex items-center bg-gray-50/50 rounded-l-lg h-9">
         <Filter className="h-4 w-4" />
       </div>
       
-      {/* 1. Systems Slicer (Parent) */}
       <select 
         className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-100 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
         value={biSystemFilter} 
         onChange={handleSystemChange}
       >
         <option value="All">All Systems</option>
-        {allSystemNames.map(name => <option key={name} value={name}>{name}</option>)}
+        {availableSystems.map(name => <option key={name as string} value={name as string}>{name as string}</option>)}
       </select>
 
-      {/* 2. Units Slicer (Child) */}
       <select 
         className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-100 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
         value={biUnitFilter} 
@@ -309,18 +369,18 @@ const Index = () => {
         {availableUnits.map(unit => <option key={unit} value={unit}>{unit}</option>)}
       </select>
 
-      {/* 3. Departments Slicer (Grandchild) */}
       <select 
         className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer px-3 h-9 hover:bg-gray-50 transition-colors rounded-r-lg max-w-[200px]" 
         value={biDeptFilter} 
-        onChange={(e) => setBiDeptFilter(e.target.value)}
+        onChange={handleDeptChange}
       >
         <option value="All">All Departments</option>
-        {availableDepts.map(name => <option key={name} value={name}>{name}</option>)}
+        {availableDepts.map(name => <option key={name as string} value={name as string}>{name as string}</option>)}
       </select>
     </div>
   );
 
+  // THIS IS THE FIX: The missing Live Mode render block has been restored here!
   if (isLiveMode) {
     return (
       <div className="min-h-screen bg-dashboard-bg overflow-y-auto custom-scrollbar">
@@ -356,22 +416,24 @@ const Index = () => {
   }
 
   return (
-    <div className="flex h-screen bg-dashboard-bg overflow-hidden">
+    <div className="flex h-screen bg-dashboard-bg overflow-hidden relative">
       
-      <aside className="w-64 bg-white border-r border-border flex flex-col shrink-0 shadow-sm z-10">
-        <div className="h-20 flex items-center px-6 border-b border-border">
-          <div className="flex items-center space-x-3">
+      <aside className={`${isSidebarCollapsed ? 'w-20' : 'w-64'} bg-white border-r border-border flex flex-col shrink-0 shadow-sm z-10 transition-all duration-300 ease-in-out`}>
+        <div className="h-20 flex items-center justify-center px-4 border-b border-border">
+          <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'space-x-3 w-full'}`}>
             <div className="w-9 h-9 bg-gray-900 rounded-lg flex items-center justify-center shadow-sm shrink-0">
               <Monitor className="h-5 w-5 text-white" />
             </div>
-            <div>
-              <h1 className="text-xl font-bold text-gray-900 tracking-tight">Smart Analytics</h1>
-              <p className="text-[9px] text-gray-500 uppercase tracking-widest font-semibold mt-0.5">OS Analytics Manager</p>
-            </div>
+            {!isSidebarCollapsed && (
+              <div className="overflow-hidden whitespace-nowrap">
+                <h1 className="text-xl font-bold text-gray-900 tracking-tight">Smart Analytics</h1>
+                <p className="text-[9px] text-gray-500 uppercase tracking-widest font-semibold mt-0.5">OS Analytics Manager</p>
+              </div>
+            )}
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-1 custom-scrollbar">
+        <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-1 custom-scrollbar overflow-x-hidden">
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -379,31 +441,39 @@ const Index = () => {
               <button
                 key={item.id}
                 onClick={() => { setActiveTab(item.id); setSelectedDeptId(null); }}
-                className={`w-full flex items-center space-x-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${
+                title={isSidebarCollapsed ? item.label : undefined}
+                className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center' : 'space-x-3'} px-3 py-2.5 rounded-lg text-sm font-medium transition-colors duration-200 ${
                   isActive 
                   ? 'bg-indigo-50 text-indigo-700 shadow-sm border border-indigo-100/50' 
                   : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
                 }`}
               >
                 <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-indigo-600' : 'text-gray-400'}`} />
-                <span>{item.label}</span>
+                {!isSidebarCollapsed && <span className="whitespace-nowrap">{item.label}</span>}
               </button>
             );
           })}
         </nav>
 
         <div className="p-4 border-t border-border bg-gray-50/50">
-          <div className="flex items-center space-x-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm mb-3">
-            {role === 'SuperAdmin' ? <ShieldAlert className="h-4 w-4 text-green-600 shrink-0" /> : 
-             role === 'DepartmentHead' ? <Shield className="h-4 w-4 text-green-600 shrink-0" /> : 
-             <User className="h-4 w-4 text-green-600 shrink-0" />}
-            <div className="truncate">
-              <p className="text-xs font-bold text-gray-900 truncate">Logged In</p>
-              <p className="text-[10px] font-semibold text-green-700 uppercase tracking-wider truncate">{role}</p>
+          {!isSidebarCollapsed ? (
+            <div className="flex items-center space-x-2 bg-white px-3 py-2 rounded-lg border border-gray-200 shadow-sm mb-3 whitespace-nowrap overflow-hidden">
+              {role === 'SuperAdmin' ? <ShieldAlert className="h-4 w-4 text-green-600 shrink-0" /> : <Shield className="h-4 w-4 text-green-600 shrink-0" />}
+              <div className="truncate">
+                <p className="text-xs font-bold text-gray-900 truncate">Logged In</p>
+                <p className="text-[10px] font-semibold text-green-700 uppercase tracking-wider truncate">{role}</p>
+              </div>
             </div>
-          </div>
-          <Button onClick={handleLogout} variant="outline" className="w-full bg-white border-gray-200 text-gray-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors shadow-sm">
-            <LogOut className="h-4 w-4 mr-2" /> Logout
+          ) : (
+            <div className="flex justify-center mb-3">
+              <div className="w-8 h-8 rounded-full bg-white border border-gray-200 flex items-center justify-center shadow-sm">
+                <ShieldAlert className="h-4 w-4 text-green-600" />
+              </div>
+            </div>
+          )}
+          <Button onClick={handleLogout} variant="outline" className={`w-full bg-white border-gray-200 text-gray-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors shadow-sm ${isSidebarCollapsed ? 'px-0 justify-center' : ''}`} title={isSidebarCollapsed ? "Logout" : undefined}>
+            <LogOut className={`h-4 w-4 ${isSidebarCollapsed ? '' : 'mr-2'}`} /> 
+            {!isSidebarCollapsed && "Logout"}
           </Button>
         </div>
       </aside>
@@ -412,15 +482,24 @@ const Index = () => {
         
         <header className="h-20 bg-white border-b border-border px-8 flex items-center justify-between shrink-0 shadow-sm z-0">
           
-          <div className="flex items-center space-x-6 flex-1">
+          <div className="flex items-center space-x-4 flex-1">
+            <Button 
+              variant="ghost" 
+              size="icon" 
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
+              className="text-gray-500 hover:bg-gray-100 rounded-full h-9 w-9 shrink-0"
+            >
+              <Menu className="h-5 w-5" />
+            </Button>
+
             {activeTab !== 'dashboard' && (
-              <h2 className="text-lg font-bold text-gray-900 capitalize tracking-tight min-w-max">
+              <h2 className="text-lg font-bold text-gray-900 capitalize tracking-tight min-w-max ml-2">
                 {activeTab === 'users' ? 'Identity Matrix' : activeTab.replace('-', ' ')}
               </h2>
             )}
             
             {activeTab === 'dashboard' && role !== 'StandardUser' && (
-              <div>
+              <div className="ml-2">
                 {renderTripleTierFilters()}
               </div>
             )}
@@ -432,14 +511,29 @@ const Index = () => {
                 onClick={() => setIsLiveMode(true)} 
                 variant="outline" 
                 size="sm" 
-                className="inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 h-9 rounded-md px-3 bg-success hover:bg-green-500 text-white shadow-sm transition-colors duration-200 border-none"
+                className="inline-flex items-center justify-center h-9 rounded-md px-3 bg-success hover:bg-green-500 text-white shadow-sm transition-colors duration-200 border-none"
               >
                 <Monitor className="h-4 w-4 mr-2 text-white" /> Live Dashboard
               </Button>
             )}
             <div className="h-6 w-px bg-gray-200 mx-1"></div>
             
-            <Button onClick={handleExportData} variant="outline" size="icon" className="bg-white border-gray-200 text-gray-500 hover:text-gray-900 shadow-sm h-9 w-9" title="Export Audit CSV">
+            <Button 
+              onClick={() => setIsArchiveOpen(true)} 
+              variant="outline" 
+              size="icon" 
+              className="bg-white border-gray-200 text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 shadow-sm h-9 w-9 relative" 
+              title="Report Archive"
+            >
+              <Archive className="h-4 w-4" />
+              {savedReports.length > 0 && (
+                <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold h-4 w-4 rounded-full flex items-center justify-center">
+                  {savedReports.length}
+                </span>
+              )}
+            </Button>
+            
+            <Button onClick={handleExportData} variant="outline" size="icon" className="bg-white border-gray-200 text-gray-500 hover:text-gray-900 shadow-sm h-9 w-9" title="Export Current View">
               <Download className="h-4 w-4" />
             </Button>
             
@@ -457,6 +551,63 @@ const Index = () => {
         </div>
         
       </main>
+
+      {isArchiveOpen && (
+        <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-[100] flex items-center justify-center animate-in fade-in duration-200 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
+              <div className="flex items-center text-gray-900">
+                <Archive className="h-5 w-5 mr-2 text-indigo-600" />
+                <h2 className="text-lg font-bold">Generated Reports Archive</h2>
+              </div>
+              <button onClick={() => setIsArchiveOpen(false)} className="text-gray-400 hover:text-gray-700 bg-white border border-gray-200 rounded-md p-1 shadow-sm transition-colors">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-2 bg-gray-50/30 custom-scrollbar">
+              {savedReports.length === 0 ? (
+                <div className="py-20 flex flex-col items-center justify-center text-gray-400">
+                  <FileText className="h-12 w-12 mb-3 opacity-20" />
+                  <p className="text-sm font-medium">No reports have been generated yet.</p>
+                  <p className="text-xs mt-1 text-gray-400">Click the export buttons on the dashboard to archive them here.</p>
+                </div>
+              ) : (
+                <div className="space-y-2 p-2">
+                  {savedReports.map(report => (
+                    <div key={report.id} className="flex justify-between items-center p-4 bg-white border border-gray-200 rounded-lg shadow-sm hover:border-indigo-200 transition-colors group">
+                      <div className="flex items-start">
+                        <FileText className="h-8 w-8 text-indigo-100 fill-indigo-600 mr-3 shrink-0" />
+                        <div>
+                          <p className="font-bold text-sm text-gray-800 truncate max-w-[300px] sm:max-w-md">{report.filename}</p>
+                          <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-500 mt-1">{report.date}</p>
+                        </div>
+                      </div>
+                      <Button 
+                        onClick={() => handleReDownload(report.filename, report.content)} 
+                        variant="outline" 
+                        size="sm"
+                        className="bg-white text-indigo-600 hover:bg-indigo-50 hover:border-indigo-200 border-gray-200 shadow-sm shrink-0"
+                      >
+                        <Download className="h-3.5 w-3.5 sm:mr-2" />
+                        <span className="hidden sm:inline">Download</span>
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            
+            {savedReports.length > 0 && (
+              <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex justify-end">
+                <Button onClick={handleClearArchive} variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700 text-xs font-semibold">
+                  Clear History
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -14,7 +14,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
   const [isSyncing, setIsSyncing] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   
-  // --- SMART CASCADING FILTERS ---
+  // --- STRICT TOP-DOWN CASCADING FILTERS ---
   const [systemFilter, setSystemFilter] = useState<string>("All");
   const [unitFilter, setUnitFilter] = useState<string>("All"); 
   const [deptFilter, setDeptFilter] = useState<string>("All"); 
@@ -31,53 +31,80 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
     }
   };
 
-  // --- HIERARCHY ENGINE ---
+  // --- STRICT HIERARCHY ENGINE ---
   const municipalUnits = ["Information Management Unit (IMU)", "Water & Sanitation Unit", "Metro Police Unit", "Parks & Recreation Unit"];
+  
+  // Explicitly define IMU departments so there is zero confusion
+  const imuDepartments = [
+    "Enterprise Architecture", 
+    "Applications/Dev", 
+    "Networks", 
+    "PMO", 
+    "Security", 
+    "GIS", 
+    "Admin", 
+    "Customer Service"
+  ];
   
   const getUnitForDept = (deptName: string) => {
     if (!deptName || deptName === 'Unassigned') return "Other";
+    
+    // 1. Strict match for IMU
+    if (imuDepartments.includes(deptName)) {
+      return "Information Management Unit (IMU)";
+    }
+    
+    // 2. Fallbacks for other units
     const lower = deptName.toLowerCase();
-    if (lower.includes("it") || lower.includes("architecture")) return "Information Management Unit (IMU)";
     if (lower.includes("water") || lower.includes("sanitation")) return "Water & Sanitation Unit";
     if (lower.includes("police")) return "Metro Police Unit";
     if (lower.includes("park") || lower.includes("recreation")) return "Parks & Recreation Unit";
+    
     return "Other";
   };
 
-  // Extract global lists for filters
-  const allSystems = Array.from(new Set(users.flatMap(u => u.assigned_systems?.map((s:any) => s.name) || [])));
-  const allDepts = Array.from(new Set(users.map(u => u.department).filter(d => d && d !== 'Unassigned')));
+  // 1. Master Lists (Always show all systems so user can start from the top)
+  const allSystems = Array.from(new Set(users.flatMap(u => u.assigned_systems?.map((s:any) => s.name) || []))).sort();
+  const allDepts = Array.from(new Set(users.map(u => u.department).filter(d => d && d !== 'Unassigned'))).sort();
 
-  // 1. Cascading Options
+  // 2. Available Units (Filtered strictly by selected System)
   const availableUnits = municipalUnits.filter(unit => {
     if (systemFilter === "All") return true;
-    const usersWithSystem = users.filter(u => u.assigned_systems?.some((s:any) => s.name === systemFilter));
-    const validUnits = new Set<string>(usersWithSystem.map(u => getUnitForDept(u.department)));
-    return validUnits.has(unit);
+    // Check if ANY user in this unit has the selected system
+    return users.some(u => 
+      getUnitForDept(u.department) === unit && 
+      u.assigned_systems?.some((s:any) => s.name === systemFilter)
+    );
   });
 
+  // 3. Available Departments (Filtered strictly by selected System AND selected Unit)
   const availableDepts = allDepts.filter(dept => {
+    // Rule A: Must belong to the selected Unit
+    if (unitFilter !== "All" && getUnitForDept(dept as string) !== unitFilter) return false;
+    
+    // Rule B: Must use the selected System
     if (systemFilter !== "All") {
-      const usersWithSystem = users.filter(u => u.assigned_systems?.some((s:any) => s.name === systemFilter));
-      if (!usersWithSystem.some(u => u.department === dept)) return false;
+      const usersInThisDept = users.filter(u => u.department === dept);
+      const deptUsesSystem = usersInThisDept.some(u => u.assigned_systems?.some((s:any) => s.name === systemFilter));
+      if (!deptUsesSystem) return false;
     }
-    if (unitFilter !== "All" && getUnitForDept(dept) !== unitFilter) return false;
+    
     return true;
   });
 
-  // 2. Filter Handlers (Resetting children on parent change)
+  // --- CASCADING RESET HANDLERS ---
   const handleSystemChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setSystemFilter(e.target.value);
-    setUnitFilter("All");
-    setDeptFilter("All");
+    setUnitFilter("All"); // Reset child
+    setDeptFilter("All"); // Reset grandchild
   };
 
   const handleUnitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     setUnitFilter(e.target.value);
-    setDeptFilter("All");
+    setDeptFilter("All"); // Reset child
   };
 
-  // 3. Final Master Data Filter
+  // --- FINAL DATA FILTER FOR THE TABLE ---
   const filteredUsers = users.filter(user => {
     if (searchTerm && !user.email.toLowerCase().includes(searchTerm.toLowerCase())) return false;
     if (systemFilter !== "All" && !user.assigned_systems?.some((s:any) => s.name === systemFilter)) return false;
@@ -92,7 +119,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
       {/* HEADER & CONTROLS */}
       <div className="flex flex-col xl:flex-row justify-between items-start xl:items-center gap-4 border-b border-border pb-4 shrink-0">
         
-        {/* LEFT: TITLE */}
         <div>
           <h2 className="text-xl font-semibold text-metric-value flex items-center">
             <Users className="h-5 w-5 mr-2 text-indigo-600" />
@@ -101,14 +127,15 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
           <p className="text-sm text-metric-label mt-1">Single source of truth for municipal staff access and structure.</p>
         </div>
 
-        {/* RIGHT: ALL CONTROLS (Filters + Search + Sync) */}
         <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto">
           
-          {/* SMART CASCADING FILTERS */}
+          {/* TOP-DOWN CASCADING FILTERS */}
           <div className="hidden md:flex items-center bg-white border border-gray-200 rounded-lg shadow-sm">
             <div className="px-3 text-gray-400 border-r border-gray-100 flex items-center bg-gray-50/50 rounded-l-lg h-9">
               <Filter className="h-4 w-4" />
             </div>
+            
+            {/* SYSTEM DROPDOWN (Top Level) */}
             <select 
               className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-100 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[140px] truncate" 
               value={systemFilter} onChange={handleSystemChange}
@@ -116,6 +143,8 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
               <option value="All">All Systems</option>
               {allSystems.map(name => <option key={name as string} value={name as string}>{name as string}</option>)}
             </select>
+            
+            {/* UNIT DROPDOWN (Second Level) */}
             <select 
               className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer border-r border-gray-100 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[140px] truncate" 
               value={unitFilter} onChange={handleUnitChange}
@@ -123,6 +152,8 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
               <option value="All">All Units</option>
               {availableUnits.map(unit => <option key={unit} value={unit}>{unit}</option>)}
             </select>
+            
+            {/* DEPT DROPDOWN (Third Level) */}
             <select 
               className="bg-transparent text-xs font-semibold text-gray-700 outline-none cursor-pointer px-3 h-9 hover:bg-gray-50 transition-colors rounded-r-lg max-w-[140px] truncate" 
               value={deptFilter} onChange={(e) => setDeptFilter(e.target.value)}
@@ -132,7 +163,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
             </select>
           </div>
           
-          {/* SEARCH BAR */}
           <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <input 
@@ -159,7 +189,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
       {/* DENSE ENTERPRISE DATA TABLE */}
       <div className="flex-1 bg-white border border-border rounded-xl shadow-sm overflow-hidden flex flex-col relative">
         
-        {/* Results Counter */}
         <div className="bg-gray-50/50 px-6 py-2.5 border-b border-gray-100 flex justify-between items-center text-xs font-semibold text-gray-500">
           <span>Displaying {filteredUsers.length} authorized personnel</span>
           {systemFilter !== 'All' && <span className="text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-100">Filtered by: {systemFilter}</span>}
@@ -231,7 +260,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
                           {user.assigned_systems?.length > 0 ? (
                             user.assigned_systems.map((sys: any) => {
                               
-                              // --- DEMO STATUS ENGINE ---
                               const mockDaysAgo = (user.id + sys.id * 7) % 45; 
                               const isAbandoned = mockDaysAgo > 30; 
                               

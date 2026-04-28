@@ -13,8 +13,6 @@ const JWT_SECRET = process.env.JWT_SECRET || 'enterprise_super_secret_key_2026';
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 // --- 1. ENTERPRISE SECURITY & CORS CONFIGURATION ---
-// FIX: Updated for seamless cloud demo deployment. 
-// Allows Netlify to communicate with Render without triggering wildcard credential errors.
 app.use(cors({
   origin: '*', 
   methods: ['GET', 'POST', 'PUT', 'DELETE']
@@ -29,25 +27,13 @@ const pool = new Pool({
   idleTimeoutMillis: 30000
 });
 
-console.log("✅ Municipal Connection Pool Initialized.");
+console.log("✅ Municipal Connection Pool Initialized (IMU Focused).");
 
-// --- 3. AUTHENTICATION MIDDLEWARE (The "Bouncer") ---
+// --- 3. AUTHENTICATION MIDDLEWARE ---
 const authenticateToken = (req, res, next) => {
   // DEMO BYPASS: Removes the login barrier for seamless presentation flows.
   req.user = { role: 'SuperAdmin' }; 
   return next(); 
-
-  /* PRODUCTION LOGIC (Uncomment for live deployment):
-  const authHeader = req.headers['authorization'];
-  const token = authHeader && authHeader.split(' ')[1];
-  if (!token) return res.status(401).json({ error: "Access Denied. No token provided." });
-
-  jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: "Invalid or expired token." });
-    req.user = user;
-    next();
-  });
-  */
 };
 
 // --- 4. AUTHENTICATION ROUTES (Open to public for login) ---
@@ -85,22 +71,22 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Login failed" }); }
 });
 
-// --- 5. DATA CONNECTOR & ETL ROUTES (Secured with authenticateToken) ---
+// --- 5. DATA CONNECTOR & ETL ROUTES (IMU TAILORED) ---
 app.post('/api/pmo/sync', authenticateToken, async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN'); 
     const municipalProjects = [
-      { project_name: "eThekwini Smart Meter Rollout", pmo_ref: "ETH-2026-UTIL", status: "Active" },
-      { project_name: "Pinetown Infrastructure Upgrade", pmo_ref: "ETH-2025-CIVIL", status: "Closed" },
-      { project_name: "Durban CBD Fiber Expansion", pmo_ref: "ETH-2026-ICT", status: "Active" },
-      { project_name: "Public Transport Billing System", pmo_ref: "ETH-2024-TRANS", status: "Closed" }
+      { project_name: "IMU Cloud Migration", pmo_ref: "IMU-2026-CLOUD", status: "Active" },
+      { project_name: "Legacy Server Decom", pmo_ref: "IMU-2025-INFRA", status: "Closed" },
+      { project_name: "Enterprise Architecture Review", pmo_ref: "IMU-2026-EA", status: "Active" },
+      { project_name: "Smart City Data Hub", pmo_ref: "IMU-2024-DATA", status: "Closed" }
     ];
     for (const row of municipalProjects) {
       await client.query('INSERT INTO pmo_projects (project_name, pmo_reference_code, status) VALUES ($1, $2, $3) ON CONFLICT (project_name) DO UPDATE SET status = EXCLUDED.status', [row.project_name, row.pmo_ref, row.status]);
     }
     await client.query('COMMIT'); 
-    res.json({ message: "Municipal PMO Sync Successful", records_processed: municipalProjects.length });
+    res.json({ message: "IMU PMO Sync Successful", records_processed: municipalProjects.length });
   } catch (err) { 
     await client.query('ROLLBACK'); 
     res.status(500).json({ error: "PMO Sync failed", details: err.message }); 
@@ -118,11 +104,16 @@ app.post('/api/connectors/:id/sync', authenticateToken, async (req, res) => {
     
     await client.query('BEGIN'); 
     
+    // THE NEW IMU-SPECIFIC DATA ENGINE
     const municipalData = [
-      { email: "dir.water@durban.gov.za", dept: "Water & Sanitation", apps: [{ name: "ArcGIS", category: "Mapping", price: 1250.00, usage: 300 }, { name: "Slack", category: "Communication", price: 150.00, usage: 20 }] },
-      { email: "ops.police@durban.gov.za", dept: "Metro Police", apps: [{ name: "Jira", category: "Operations", price: 450.00, usage: 450 }, { name: "Slack", category: "Communication", price: 150.00, usage: 10 }] },
-      { email: "head.parks@durban.gov.za", dept: "Parks & Recreation", apps: [{ name: "Asana", category: "Projects", price: 380.00, usage: 5 }] },
-      { email: "cio.office@durban.gov.za", dept: "IT & Infrastructure", apps: [{ name: "Jira", category: "Operations", price: 450.00, usage: 800 }, { name: "Zoom", category: "Communication", price: 280.00, usage: 1200 }] }
+      { email: "ea.lead@durban.gov.za", dept: "Enterprise Architecture", apps: [{ name: "Sparx EA", category: "Architecture", price: 3500.00, usage: 1200 }, { name: "MS Visio Pro", category: "Architecture", price: 850.00, usage: 15 }] },
+      { email: "dev.lead@durban.gov.za", dept: "Applications/Dev", apps: [{ name: "GitHub Enterprise", category: "Development", price: 2100.00, usage: 3000 }, { name: "Jira", category: "Operations", price: 450.00, usage: 450 }] },
+      { email: "net.admin@durban.gov.za", dept: "Networks", apps: [{ name: "SolarWinds", category: "Infrastructure", price: 5200.00, usage: 8000 }] },
+      { email: "pmo.head@durban.gov.za", dept: "PMO", apps: [{ name: "MS Project", category: "Projects", price: 1100.00, usage: 200 }, { name: "Asana", category: "Projects", price: 380.00, usage: 10 }, { name: "DocuSign Enterprise", category: "Electronic Sign", price: 1200.00, usage: 5 }] },
+      { email: "ciso@durban.gov.za", dept: "Security", apps: [{ name: "Splunk", category: "Security", price: 8500.00, usage: 9000 }, { name: "CrowdStrike", category: "Security", price: 4200.00, usage: 8500 }] },
+      { email: "gis.manager@durban.gov.za", dept: "GIS", apps: [{ name: "ArcGIS", category: "Mapping", price: 4250.00, usage: 600 }] },
+      { email: "admin.head@durban.gov.za", dept: "Admin", apps: [{ name: "Microsoft 365", category: "Productivity", price: 350.00, usage: 1500 }, { name: "DocuSign Enterprise", category: "Electronic Sign", price: 1200.00, usage: 20 }] },
+      { email: "cs.manager@durban.gov.za", dept: "Customer Service", apps: [{ name: "Zendesk", category: "Support", price: 1800.00, usage: 4500 }, { name: "Microsoft 365", category: "Productivity", price: 350.00, usage: 2000 }] }
     ];
 
     for (const entry of municipalData) {
@@ -137,7 +128,7 @@ app.post('/api/connectors/:id/sync', authenticateToken, async (req, res) => {
     await client.query('UPDATE data_connectors SET last_sync = CURRENT_TIMESTAMP, status = \'active\' WHERE id = $1', [id]);
     
     await client.query('COMMIT');
-    res.json({ message: "Durban Gov Sync Successful" });
+    res.json({ message: "IMU Sync Successful" });
   } catch (err) {
     await client.query('ROLLBACK');
     res.status(500).json({ error: "Sync failed", details: err.message });
@@ -148,7 +139,7 @@ app.post('/api/connectors/:id/sync', authenticateToken, async (req, res) => {
 
 app.post('/api/users/sync', authenticateToken, async (req, res) => { setTimeout(() => { res.json({ message: "Identity Provider Sync Complete" }); }, 1000); });
 
-// --- 6. AI ADVISOR ENGINE (Secured) ---
+// --- 6. AI ADVISOR ENGINE ---
 app.get('/api/ai/insights', authenticateToken, async (req, res) => {
   try {
     const costRes = await pool.query(`SELECT SUM(price) as total FROM subscriptions WHERE status = 'active'`);
@@ -165,15 +156,15 @@ app.get('/api/ai/insights', authenticateToken, async (req, res) => {
       const dupCost = context.duplications.reduce((sum, d) => sum + d.cost, 0);
       const zombieCost = context.zombieLicenses.reduce((sum, z) => sum + z.cost, 0);
       
-      let insight = `Executive Summary: The current municipal SaaS burn rate is ZAR ${context.totalMonthlyBurn.toLocaleString()}. `;
-      if (context.duplications.length > 0) insight += `Critical waste of ZAR ${dupCost.toLocaleString()} identified in ${context.duplications.map(d => d.category).join('/')} tools across departments. `;
+      let insight = `Executive Summary: The current IMU SaaS burn rate is ZAR ${context.totalMonthlyBurn.toLocaleString()}. `;
+      if (context.duplications.length > 0) insight += `Critical waste of ZAR ${dupCost.toLocaleString()} identified in ${context.duplications.map(d => d.category).join('/')} tools across IMU departments. `;
       if (context.zombieLicenses.length > 0) insight += `Furthermore, ZAR ${zombieCost.toLocaleString()} is being bled by licenses tied to the COMPLETED '${context.zombieLicenses[0]?.project || 'Infrastructure'}' project. `;
-      insight += `Recommendation: Immediate decommissioning of redundant accounts to protect public funds.`;
+      insight += `Recommendation: Immediate decommissioning of redundant accounts to protect IT funds.`;
       
       return res.json({ insight, status: "simulated" });
     }
 
-    const prompt = `You are a strict Municipal Data Architect in Durban, South Africa. Review this JSON data: ${JSON.stringify(context)}. Write a professional, punchy 3-sentence executive summary for the Council advising exactly where they are wasting money. Use South African Rands (ZAR).`;
+    const prompt = `You are a strict Municipal Data Architect in Durban, South Africa advising the CIO. Review this JSON data representing the IMU (Information Management Unit): ${JSON.stringify(context)}. Write a professional, punchy 3-sentence executive summary for the CIO advising exactly where they are wasting money in the IMU. Use South African Rands (ZAR).`;
     const aiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
     });
@@ -185,7 +176,7 @@ app.get('/api/ai/insights', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 7. CORE BUSINESS LOGIC (Secured) ---
+// --- 7. CORE BUSINESS LOGIC ---
 
 app.get('/api/metrics/trends', authenticateToken, async (req, res) => {
   try {
@@ -344,7 +335,7 @@ app.get('/api/recommendations', authenticateToken, async (req, res) => {
 
 app.get('/api/settings', authenticateToken, async (req, res) => {
   const r = await pool.query('SELECT monthly_budget FROM settings WHERE id = 1');
-  res.json(r.rows[0] || { monthly_budget: 2000.00 });
+  res.json(r.rows[0] || { monthly_budget: 35000.00 }); 
 });
 
 app.get('/api/connectors', authenticateToken, async (req, res) => {
