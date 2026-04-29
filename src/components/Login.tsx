@@ -7,7 +7,8 @@ import { Monitor, Lock } from "lucide-react";
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 interface LoginProps {
-  onLoginSuccess: (token: string, role: string) => void;
+  // CRITICAL FIX: Added deptId as an optional third argument
+  onLoginSuccess: (token: string, role: string, deptId?: number) => void;
 }
 
 export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
@@ -22,7 +23,6 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
     setError('');
 
     try {
-      // FIX: Changed hardcoded localhost to the dynamic API_URL
       const res = await fetch(`${API_URL}/api/auth/login`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -31,12 +31,12 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
       const data = await res.json();
       if (res.ok) {
-        onLoginSuccess(data.token, data.user.role);
+        // FIX: Passing the department ID to Index.tsx so the DD view can filter correctly
+        onLoginSuccess(data.token, data.user.role, data.user.deptId);
       } else {
         setError(data.error || 'Login failed');
       }
     } catch (err) {
-      // This is the error you were seeing on your phone!
       setError('Network error. Ensure server is running.');
       console.error("Login Error:", err);
     } finally {

@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Card } from "@/components/ui/card";
-import { Clock, AlertCircle, Activity, PieChart as PieIcon, ExternalLink } from 'lucide-react';
+import { Clock, AlertCircle, Activity, PieChart as PieIcon, ExternalLink, ArrowLeft, Server } from 'lucide-react';
 import { PieChart, Pie, Cell, ResponsiveContainer, Sector } from 'recharts';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -11,8 +11,7 @@ interface CategoryUsageChartProps {
   onNavigateToRecommendations?: () => void; 
 }
 
-// --- NEW: Custom Active Shape for the Pie Chart ---
-// This draws the pop-out slice, the connecting line, and the data labels.
+// --- Custom Active Shape for the Pie Chart ---
 const renderActiveShape = (props: any) => {
   const RADIAN = Math.PI / 180;
   const { cx, cy, midAngle, innerRadius, outerRadius, startAngle, endAngle, fill, payload, percent, value } = props;
@@ -27,21 +26,17 @@ const renderActiveShape = (props: any) => {
   const textAnchor = cos >= 0 ? 'start' : 'end';
 
   return (
-    <g>
-      {/* Category Name in the center hole */}
+    <g className="cursor-pointer">
       <text x={cx} y={cy} dy={4} textAnchor="middle" fill="#1e3a8a" className="font-bold text-xs uppercase tracking-wider">
         {payload.category.length > 12 ? payload.category.substring(0, 10) + '...' : payload.category}
       </text>
       
-      {/* The popped-out slice */}
       <Sector cx={cx} cy={cy} innerRadius={innerRadius} outerRadius={outerRadius + 8} startAngle={startAngle} endAngle={endAngle} fill={fill} />
       <Sector cx={cx} cy={cy} startAngle={startAngle} endAngle={endAngle} innerRadius={outerRadius + 10} outerRadius={outerRadius + 14} fill={fill} />
       
-      {/* The connecting line */}
       <path d={`M${sx},${sy}L${mx},${my}L${ex},${ey}`} stroke={fill} fill="none" strokeWidth={2} />
       <circle cx={ex} cy={ey} r={3} fill={fill} stroke="none" />
       
-      {/* Data Labels (Minutes and Percentage) */}
       <text x={ex + (cos >= 0 ? 1 : -1) * 12} y={ey} textAnchor={textAnchor} fill="#1e3a8a" className="font-bold text-xs">
         {`${value} mins`}
       </text>
@@ -52,14 +47,16 @@ const renderActiveShape = (props: any) => {
   );
 };
 
-
 export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFilter, deptFilter, onNavigateToRecommendations }) => {
   const [data, setData] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [chartType, setChartType] = useState<'list' | 'pie'>('list');
-  
-  // NEW: State to track which slice is currently hovered/active
+  const [chartType, setChartType] = useState<'list' | 'pie'>('pie');
   const [activeIndex, setActiveIndex] = useState<number>(0);
+
+  // --- NEW: Drill-Down States ---
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [categorySystems, setCategorySystems] = useState<any[]>([]);
+  const [isDrillDownLoading, setIsDrillDownLoading] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
@@ -72,7 +69,7 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
         if (res.ok) {
           const rawData = await res.json();
           setData(rawData);
-          setActiveIndex(0); // Reset hover state on fresh data
+          setActiveIndex(0); 
         }
       } catch (err) {
         console.error("Failed to fetch category data", err);
@@ -83,6 +80,29 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
     
     fetchData();
   }, [systemFilter, deptFilter]);
+
+  // --- NEW: Handle Drill-Down Click ---
+  const handleCategoryClick = async (category: string) => {
+    setSelectedCategory(category);
+    setIsDrillDownLoading(true);
+    try {
+      const token = localStorage.getItem('appManagerToken');
+      // Fetch the full catalog so we can filter by the clicked category
+      const res = await fetch(`${API_URL}/api/systems`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const allSystems = await res.json();
+        // Filter systems that belong to the clicked category
+        const filtered = allSystems.filter((s: any) => s.category === category);
+        setCategorySystems(filtered);
+      }
+    } catch (err) {
+      console.error("Failed to fetch category systems", err);
+    } finally {
+      setIsDrillDownLoading(false);
+    }
+  };
 
   const baselineCapacity = 3000; 
   
@@ -99,7 +119,6 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
     };
   }).sort((a, b) => b.active - a.active); 
 
-  // BRANDING: eThekwini Palette
   const pieColorsActive = ['#1e3a8a', '#0ea5e9', '#facc15', '#1d4ed8', '#7dd3fc', '#eab308'];
 
   const handleEAFlagClick = () => {
@@ -117,7 +136,8 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
         <div className="flex items-center">
           <button 
             onClick={toggleChartType} 
-            className="mr-3 p-2 bg-white hover:bg-blue-50 rounded-lg border border-gray-200 shadow-sm text-blue-800 transition-all group" 
+            disabled={selectedCategory !== null} // Disable toggle when drilled down
+            className="mr-3 p-2 bg-white hover:bg-blue-50 disabled:opacity-50 disabled:hover:bg-white rounded-lg border border-gray-200 shadow-sm text-blue-800 transition-all group" 
             title="Click to change chart style"
           >
             {chartType === 'list' && <Activity className="h-4 w-4 group-hover:scale-110 transition-transform" />}
@@ -147,6 +167,46 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
           <div className="h-full flex items-center justify-center">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-900"></div>
           </div>
+        ) : selectedCategory ? (
+          // --- NEW: DRILL-DOWN VIEW ---
+          <div className="h-full flex flex-col animate-in slide-in-from-right-4 duration-300">
+            <div className="flex items-center space-x-3 mb-4 pb-2 border-b border-gray-200 shrink-0">
+              <button 
+                onClick={() => setSelectedCategory(null)} 
+                className="p-1.5 bg-gray-100 hover:bg-blue-50 text-gray-600 hover:text-blue-900 rounded-md transition-colors border border-transparent hover:border-blue-200"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+              <div>
+                <h4 className="text-sm font-bold text-blue-900">{selectedCategory} Portfolio</h4>
+                <p className="text-[10px] text-gray-500 uppercase tracking-widest font-bold">Category Drill-Down View</p>
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto custom-scrollbar space-y-2 pr-2">
+              {isDrillDownLoading ? (
+                 <div className="flex justify-center py-10"><div className="animate-spin h-6 w-6 border-b-2 border-blue-900 rounded-full"></div></div>
+              ) : categorySystems.length === 0 ? (
+                 <div className="text-center py-12 border-2 border-dashed border-gray-200 rounded-xl bg-white flex flex-col items-center">
+                   <Server className="h-8 w-8 text-gray-300 mb-2" />
+                   <p className="text-xs font-bold text-gray-500">No active systems found for {selectedCategory}.</p>
+                 </div>
+              ) : (
+                 categorySystems.map((sys) => (
+                   <div key={sys.id} className="bg-white border border-gray-200 p-3 rounded-lg hover:border-blue-300 transition-colors shadow-sm flex justify-between items-center group">
+                     <div>
+                       <p className="text-sm font-bold text-gray-900 group-hover:text-blue-900 transition-colors">{sys.name}</p>
+                       <p className="text-[10px] text-gray-500 font-semibold mt-0.5">{sys.vendor || 'Internal / Unknown'}</p>
+                     </div>
+                     <div className="text-right">
+                       <p className="text-xs font-bold text-blue-900">{sys.active_seats || 0} Seats</p>
+                       <p className="text-[9px] uppercase tracking-wider text-gray-400 font-bold">Deployed</p>
+                     </div>
+                   </div>
+                 ))
+              )}
+            </div>
+          </div>
         ) : processedData.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-gray-400">
             <Clock className="h-8 w-8 mb-2 opacity-50" />
@@ -155,7 +215,6 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
         ) : chartType === 'pie' ? (
           
           <div className="h-full w-full flex flex-col pb-2">
-            {/* The Pie Chart Area */}
             <div className="flex-1 min-h-[220px]">
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
@@ -174,23 +233,28 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
                     onMouseEnter={(_, index) => setActiveIndex(index)}
                   >
                     {processedData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={pieColorsActive[index % pieColorsActive.length]} className="cursor-pointer outline-none" />
+                      <Cell 
+                        key={`cell-${index}`} 
+                        fill={pieColorsActive[index % pieColorsActive.length]} 
+                        className="cursor-pointer outline-none" 
+                        onClick={() => handleCategoryClick(entry.category)} // Make Slice Clickable
+                      />
                     ))}
                   </Pie>
                 </PieChart>
               </ResponsiveContainer>
             </div>
 
-            {/* NEW: Interactive Custom Legend at the bottom */}
             <div className="mt-4 pt-4 border-t border-gray-200 flex flex-wrap justify-center gap-2">
               {processedData.map((entry, index) => (
                 <div
                   key={`legend-${index}`}
                   onMouseEnter={() => setActiveIndex(index)}
+                  onClick={() => handleCategoryClick(entry.category)} // Make Legend Clickable
                   className={`flex items-center px-3 py-1.5 rounded-full cursor-pointer transition-all duration-300 border ${
                     activeIndex === index 
                       ? 'bg-blue-50 border-blue-200 shadow-sm scale-105' 
-                      : 'bg-white border-gray-200 hover:bg-gray-50 opacity-70'
+                      : 'bg-white border-gray-200 hover:bg-blue-50 opacity-70'
                   }`}
                 >
                   <div 
@@ -213,9 +277,13 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
               const displayPercent = item.activePercent;
 
               return (
-                <div key={index} className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:shadow-md transition-shadow">
+                <div 
+                  key={index} 
+                  onClick={() => handleCategoryClick(item.category)} // Make List Row Clickable
+                  className="bg-white p-4 rounded-xl border border-gray-100 shadow-sm hover:border-blue-300 hover:shadow-md cursor-pointer transition-all group"
+                >
                   <div className="flex justify-between items-center mb-2.5">
-                    <span className="text-sm font-bold text-gray-900">{item.category}</span>
+                    <span className="text-sm font-bold text-gray-900 group-hover:text-blue-900">{item.category}</span>
                     <span className={`text-xs font-bold px-2 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-100`}>
                       {displayValue} mins used
                     </span>
@@ -230,7 +298,7 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
                   
                   <div className="flex justify-between items-center text-[10px] uppercase tracking-widest font-bold text-gray-400">
                     <span>0 Mins</span>
-                    <span>{baselineCapacity} Mins Capacity</span>
+                    <span className="group-hover:text-blue-600 transition-colors">Click to View Systems ➔</span>
                   </div>
                 </div>
               );

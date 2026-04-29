@@ -13,7 +13,7 @@ import { Login } from "@/components/Login";
 import Footer from "@/components/Footer"; 
 import { Button } from "@/components/ui/button";
 import { 
-  CreditCard, DollarSign, Lightbulb, TrendingUp, TrendingDown, Lock, Server, Filter, X, 
+  CreditCard, Coins, Lightbulb, TrendingUp, TrendingDown, Lock, Server, Filter, X, 
   Monitor, ShieldAlert, Shield, User, LogOut, Download, RefreshCw, LayoutDashboard, Users, ShieldCheck, Settings, Menu, Archive, FileText
 } from "lucide-react";
 
@@ -22,6 +22,11 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 const Index = () => {
   const [token, setToken] = useState<string | null>(localStorage.getItem('appManagerToken'));
   const [role, setRole] = useState<string>(localStorage.getItem('appManagerRole') || 'StandardUser');
+  
+  // NEW: Store the department ID for Deputy Directors (DD) to filter their view
+  const [userDepartmentId, setUserDepartmentId] = useState<number | null>(
+    localStorage.getItem('appManagerDeptId') ? parseInt(localStorage.getItem('appManagerDeptId')!) : null
+  );
 
   const [activeTab, setActiveTab] = useState("dashboard");
   const [isLiveMode, setIsLiveMode] = useState<boolean>(false);
@@ -52,15 +57,20 @@ const Index = () => {
   const handleLogout = () => {
     localStorage.removeItem('appManagerToken');
     localStorage.removeItem('appManagerRole');
+    localStorage.removeItem('appManagerDeptId');
     setToken(null);
     setRole('StandardUser');
+    setUserDepartmentId(null);
   };
 
-  const handleLoginSuccess = (newToken: string, newRole: string) => {
+  const handleLoginSuccess = (newToken: string, newRole: string, deptId?: number) => {
     localStorage.setItem('appManagerToken', newToken);
     localStorage.setItem('appManagerRole', newRole);
+    if (deptId) localStorage.setItem('appManagerDeptId', deptId.toString());
+    
     setToken(newToken);
     setRole(newRole);
+    if (deptId) setUserDepartmentId(deptId);
   };
 
   useEffect(() => {
@@ -72,6 +82,16 @@ const Index = () => {
       setActiveTab('dashboard');
     }
   }, [role, activeTab]);
+
+  const fetchWithAuth = async (endpoint: string, options: RequestInit = {}) => {
+    const currentToken = localStorage.getItem('appManagerToken');
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${currentToken}`,
+      ...options.headers,
+    };
+    return fetch(`${API_URL}${endpoint}`, { ...options, headers });
+  };
 
   const refreshAllData = async () => {
     if (!token) return;
@@ -96,22 +116,18 @@ const Index = () => {
   };
 
   const handleUpdateBudget = async (nb: number) => {
-    await fetch(`${API_URL}/api/settings`, { 
-      method: 'PUT', 
-      headers: { 'Content-Type': 'application/json' }, 
-      body: JSON.stringify({ monthly_budget: nb }) 
-    });
+    await fetchWithAuth('/api/settings', { method: 'PUT', body: JSON.stringify({ monthly_budget: nb }) });
     setBudget(nb);
   };
 
   const handleReclaim = async (id: number) => {
     if (role === 'StandardUser') return;
-    const res = await fetch(`${API_URL}/api/subscriptions/${id}`, { method: 'DELETE' });
+    const res = await fetchWithAuth(`/api/subscriptions/${id}`, { method: 'DELETE' });
     if (res.ok) refreshAllData();
   };
 
   const handleDepartmentClick = async (id: number) => {
-    const res = await fetch(`${API_URL}/api/departments/${id}/details`);
+    const res = await fetchWithAuth(`/api/departments/${id}/details`);
     if (res.ok) {
       const details = await res.json();
       setDeptDetails(details);
@@ -119,15 +135,24 @@ const Index = () => {
     }
   };
 
-  const fetchTrends = async () => { const res = await fetch(`${API_URL}/api/metrics/trends`); if (res.ok) setTrends(await res.json()); };
-  const fetchAuditData = async () => { const [dupRes, deptRes] = await Promise.all([fetch(`${API_URL}/api/audit/duplication`), fetch(`${API_URL}/api/metrics/departmental-spend`)]); if (dupRes.ok) setDuplications(await dupRes.json()); if (deptRes.ok) setDeptSpend(await deptRes.json()); };
-  const fetchUsers = async () => { const res = await fetch(`${API_URL}/api/users`); if (res.ok) setUsers(await res.json()); };
-  const fetchConnectors = async () => { const res = await fetch(`${API_URL}/api/connectors`); if (res.ok) setConnectors(await res.json()); };
-  const fetchSettings = async () => { const res = await fetch(`${API_URL}/api/settings`); if (res.ok) { const d = await res.json(); setBudget(parseFloat(d.monthly_budget)); } };
-  const fetchMonthlyCost = async () => { const res = await fetch(`${API_URL}/api/metrics/monthly-cost`); if (res.ok) { const d = await res.json(); setMonthlyCost(d.total); } };
-  const fetchSubscriptions = async () => { const res = await fetch(`${API_URL}/api/subscriptions`); if (res.ok) setSubscriptions(await res.json()); };
-  const fetchSystems = async () => { const res = await fetch(`${API_URL}/api/systems`); if (res.ok) setSystems(await res.json()); };
-  const fetchRecommendations = async () => { const res = await fetch(`${API_URL}/api/recommendations`); if (res.ok) setRecommendations(await res.json()); };
+  const handleAddConnector = async (connectorData: any) => {
+    try {
+      await fetchWithAuth('/api/connectors', { method: 'POST', body: JSON.stringify(connectorData) });
+      refreshAllData(); 
+    } catch (err) {
+      console.error("Failed to save connector:", err);
+    }
+  };
+
+  const fetchTrends = async () => { const res = await fetchWithAuth('/api/metrics/trends'); if (res.ok) setTrends(await res.json()); };
+  const fetchAuditData = async () => { const [dupRes, deptRes] = await Promise.all([fetchWithAuth('/api/audit/duplication'), fetchWithAuth('/api/metrics/departmental-spend')]); if (dupRes.ok) setDuplications(await dupRes.json()); if (deptRes.ok) setDeptSpend(await deptRes.json()); };
+  const fetchUsers = async () => { const res = await fetchWithAuth('/api/users'); if (res.ok) setUsers(await res.json()); };
+  const fetchConnectors = async () => { const res = await fetchWithAuth('/api/connectors'); if (res.ok) setConnectors(await res.json()); };
+  const fetchSettings = async () => { const res = await fetchWithAuth('/api/settings'); if (res.ok) { const d = await res.json(); setBudget(parseFloat(d.monthly_budget)); } };
+  const fetchMonthlyCost = async () => { const res = await fetchWithAuth('/api/metrics/monthly-cost'); if (res.ok) { const d = await res.json(); setMonthlyCost(d.total); } };
+  const fetchSubscriptions = async () => { const res = await fetchWithAuth('/api/subscriptions'); if (res.ok) setSubscriptions(await res.json()); };
+  const fetchSystems = async () => { const res = await fetchWithAuth('/api/systems'); if (res.ok) setSystems(await res.json()); };
+  const fetchRecommendations = async () => { const res = await fetchWithAuth('/api/recommendations'); if (res.ok) setRecommendations(await res.json()); };
 
   useEffect(() => { 
     if(token) refreshAllData(); 
@@ -228,7 +253,12 @@ const Index = () => {
     }
   };
 
+  // --- INJECTED: DATA FILTERING LOGIC (Problem 3 & 5 Fix) ---
   const filteredSubscriptions = subscriptions.filter(sub => {
+    // If DD (DepartmentHead), only show their department's subs to remove guessing
+    if (role === 'DepartmentHead' && sub.department_id !== userDepartmentId) return false;
+
+    // Existing BI filters
     if (biSystemFilter !== "All" && sub.name !== biSystemFilter) return false;
     if (biUnitFilter !== "All" || biDeptFilter !== "All") {
        const userForSub = users.find(u => u.assigned_systems?.some((s:any) => s.name === sub.name && s.price === sub.price));
@@ -284,8 +314,8 @@ const Index = () => {
   const UnauthorizedView = () => (
     <div className="flex flex-col items-center justify-center py-20 text-center animate-in fade-in">
       <Lock className="h-12 w-12 text-gray-300 mb-4" />
-      <h2 className="text-xl font-semibold text-metric-value">Access Denied</h2>
-      <p className="text-sm text-metric-label mt-2">Your current clearance level ({role}) does not permit access to this module.</p>
+      <h2 className="text-xl font-semibold text-gray-900">Access Denied</h2>
+      <p className="text-sm text-gray-500 mt-2">Your current clearance level ({role}) does not permit access to this module.</p>
     </div>
   );
 
@@ -304,12 +334,24 @@ const Index = () => {
   const renderDashboardContent = () => (
     <div className="animate-in fade-in duration-500 pb-12">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <MetricCard icon={<Server className="h-5 w-5" />} title={role === 'StandardUser' ? "Approved Systems" : "Filtered Systems"} value={biSystemFilter === "All" ? systems.length.toString() : "1"} subtitle={role === 'StandardUser' ? "Available in IT Catalog" : biSystemFilter === "All" ? "Org-wide Deployments" : `Isolated View`} />
-        <MetricCard icon={<CreditCard className="h-5 w-5" />} title={role === 'StandardUser' ? "My Active Tools" : "Active Licenses"} value={role === 'StandardUser' ? "2" : filteredSubscriptions.length.toString()} subtitle={role === 'StandardUser' ? "Assigned to your account" : biSystemFilter === "All" ? "Procured seats" : `Seats for ${biSystemFilter}`} />
+        
+        <div onClick={() => { setActiveTab('systems'); setSelectedDeptId(null); }} className="cursor-pointer hover:scale-[1.02] transition-transform duration-200">
+          <MetricCard icon={<Server className="h-5 w-5" />} title={role === 'StandardUser' ? "Approved Systems" : "Filtered Systems"} value={biSystemFilter === "All" ? systems.length.toString() : "1"} subtitle={role === 'StandardUser' ? "Available in IT Catalog" : biSystemFilter === "All" ? "Org-wide Deployments" : `Isolated View`} />
+        </div>
+        
+        <div onClick={() => { setActiveTab('subscriptions'); setSelectedDeptId(null); }} className="cursor-pointer hover:scale-[1.02] transition-transform duration-200">
+          <MetricCard icon={<CreditCard className="h-5 w-5" />} title={role === 'StandardUser' ? "My Active Tools" : "Active Licenses"} value={role === 'StandardUser' ? "2" : filteredSubscriptions.length.toString()} subtitle={role === 'StandardUser' ? "Assigned to your account" : biSystemFilter === "All" ? "Procured seats" : `Seats for ${biSystemFilter}`} />
+        </div>
+        
         {role !== 'StandardUser' && (
           <>
-            <MetricCard icon={<DollarSign className="h-5 w-5" />} title={biSystemFilter === "All" && biUnitFilter === "All" ? "Total Burn" : "Filtered Burn"} value={`ZAR ${filteredMonthlyCost.toFixed(2)}`} subtitle={<div className="flex items-center space-x-2"><span className={costColor}>{biSystemFilter === "All" ? `${percentUsed.toFixed(0)}% of budget` : 'Direct Cost'}</span>{biSystemFilter === "All" && trends && (<span className={`flex items-center text-[10px] font-bold ${parseFloat(trends.momChange) > 0 ? 'text-red-500' : 'text-green-500'}`}>{parseFloat(trends.momChange) > 0 ? <TrendingUp className="h-2 w-2 mr-0.5"/> : <TrendingDown className="h-2 w-2 mr-0.5"/>}{Math.abs(trends.momChange)}%</span>)}</div>} />
-            <MetricCard icon={<Lightbulb className="h-5 w-5" />} title="Saving Ops" value={filteredRecommendations.length.toString()} subtitle={biSystemFilter === "All" ? "Optimization identified" : `Flags for ${biSystemFilter}`} />
+            <div onClick={() => { setActiveTab('audit'); setSelectedDeptId(null); }} className="cursor-pointer hover:scale-[1.02] transition-transform duration-200">
+              <MetricCard icon={<Coins className="h-5 w-5" />} title={biSystemFilter === "All" && biUnitFilter === "All" ? "Total Burn" : "Filtered Burn"} value={`ZAR ${filteredMonthlyCost.toFixed(2)}`} subtitle={<div className="flex items-center space-x-2"><span className={costColor}>{biSystemFilter === "All" ? `${percentUsed.toFixed(0)}% of budget` : 'Direct Cost'}</span>{biSystemFilter === "All" && trends && (<span className={`flex items-center text-[10px] font-bold ${parseFloat(trends.momChange) > 0 ? 'text-red-500' : 'text-green-500'}`}>{parseFloat(trends.momChange) > 0 ? <TrendingUp className="h-2 w-2 mr-0.5"/> : <TrendingDown className="h-2 w-2 mr-0.5"/>}{Math.abs(trends.momChange)}%</span>)}</div>} />
+            </div>
+            
+            <div onClick={() => { setActiveTab('recommendations'); setSelectedDeptId(null); }} className="cursor-pointer hover:scale-[1.02] transition-transform duration-200">
+              <MetricCard icon={<Lightbulb className="h-5 w-5" />} title="Saving Ops" value={filteredRecommendations.length.toString()} subtitle={biSystemFilter === "All" ? "Optimization identified" : `Flags for ${biSystemFilter}`} />
+            </div>
           </>
         )}
       </div>
@@ -344,7 +386,7 @@ const Index = () => {
     }
 
     switch (activeTab) {
-      case "admin": return role === 'SuperAdmin' ? <AdminTab onRefresh={refreshAllData} onExport={handleExportData} budget={budget} onUpdateBudget={handleUpdateBudget} connectors={connectors} onAddConnector={async () => {}} stats={{ totalApps: systems.length, activeSubscriptions: subscriptions.length, recommendations: recommendations.length, monthlyCost }} /> : <UnauthorizedView />;
+      case "admin": return role === 'SuperAdmin' ? <AdminTab onRefresh={refreshAllData} onExport={handleExportData} budget={budget} onUpdateBudget={handleUpdateBudget} connectors={connectors} onAddConnector={handleAddConnector} stats={{ totalApps: systems.length, activeSubscriptions: subscriptions.length, recommendations: recommendations.length, monthlyCost }} /> : <UnauthorizedView />;
       case "systems": return <AppsTab apps={systems} onAddApp={refreshAllData} />; 
       case "subscriptions": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? <SubscriptionsTab subscriptions={subscriptions} onAddSubscription={refreshAllData} /> : <UnauthorizedView />;
       case "audit": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? 
@@ -377,7 +419,7 @@ const Index = () => {
       </div>
       
       <select 
-        className="bg-transparent text-xs font-semibold text-blue-900 outline-none cursor-pointer border-r border-gray-200 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
+        className="bg-transparent text-xs font-bold text-blue-900 outline-none cursor-pointer border-r border-gray-200 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
         value={biSystemFilter} 
         onChange={handleSystemChange}
       >
@@ -386,7 +428,7 @@ const Index = () => {
       </select>
 
       <select 
-        className="bg-transparent text-xs font-semibold text-blue-900 outline-none cursor-pointer border-r border-gray-200 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
+        className="bg-transparent text-xs font-bold text-blue-900 outline-none cursor-pointer border-r border-gray-200 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
         value={biUnitFilter} 
         onChange={handleUnitChange}
       >
@@ -395,7 +437,7 @@ const Index = () => {
       </select>
 
       <select 
-        className="bg-transparent text-xs font-semibold text-blue-900 outline-none cursor-pointer px-3 h-9 hover:bg-gray-50 transition-colors rounded-r-lg max-w-[200px]" 
+        className="bg-transparent text-xs font-bold text-blue-900 outline-none cursor-pointer px-3 h-9 hover:bg-gray-50 transition-colors rounded-r-lg max-w-[200px]" 
         value={biDeptFilter} 
         onChange={handleDeptChange}
       >
@@ -444,22 +486,23 @@ const Index = () => {
   return (
     <div className="flex h-screen overflow-hidden relative bg-gray-50">
       
-      <aside className={`${isSidebarCollapsed ? 'w-20' : 'w-64'} bg-white border-r border-gray-200 flex flex-col shrink-0 shadow-sm z-20 transition-all duration-300 ease-in-out relative`}>
-        <div className="h-20 flex items-center justify-center px-4 border-b border-gray-200 shrink-0">
+      <aside className={`${isSidebarCollapsed ? 'w-20' : 'w-64'} bg-gradient-to-b from-blue-900 to-blue-800 border-r border-blue-950 flex flex-col shrink-0 shadow-sm z-20 transition-all duration-300 ease-in-out relative`}>
+        
+        <div className="h-20 flex items-center justify-center px-4 border-b border-blue-800 bg-sky-700 shrink-0">
           <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'space-x-3 w-full'}`}>
-            <div className="w-9 h-9 bg-blue-900 rounded-lg flex items-center justify-center shadow-sm shrink-0">
-              <Monitor className="h-5 w-5 text-yellow-400" />
+            <div className="w-9 h-9 bg-yellow-400 rounded-lg flex items-center justify-center shadow-sm shrink-0">
+              <Monitor className="h-5 w-5 text-blue-900" />
             </div>
             {!isSidebarCollapsed && (
               <div className="overflow-hidden whitespace-nowrap">
-                <h1 className="text-xl font-bold text-gray-900 tracking-tight">Smart Analytics</h1>
-                <p className="text-[9px] text-yellow-500 uppercase tracking-widest font-bold mt-0.5">Municipal OS</p>
+                <h1 className="text-xl font-bold text-white tracking-tight">Smart Analytics</h1>
+                <p className="text-[9px] text-yellow-300 uppercase tracking-widest font-bold mt-0.5">Municipal OS</p>
               </div>
             )}
           </div>
         </div>
 
-        <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-1 custom-scrollbar overflow-x-hidden bg-white">
+        <nav className="flex-1 overflow-y-auto py-6 px-4 space-y-1 custom-scrollbar overflow-x-hidden">
           {visibleNavItems.map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
@@ -470,34 +513,34 @@ const Index = () => {
                 title={isSidebarCollapsed ? item.label : undefined}
                 className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center' : 'space-x-3'} px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
                   isActive 
-                  ? 'bg-blue-50/50 text-blue-900 font-bold border-l-4 border-yellow-400 rounded-l-none' 
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-blue-900'
+                  ? 'bg-blue-950 text-yellow-400 font-bold border-l-4 border-yellow-400 rounded-l-none' 
+                  : 'text-blue-100 hover:bg-blue-800 hover:text-white'
                 }`}
               >
-                <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-blue-900' : 'text-gray-400'}`} />
+                <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-yellow-400' : 'text-blue-300'}`} />
                 {!isSidebarCollapsed && <span className="whitespace-nowrap">{item.label}</span>}
               </button>
             );
           })}
         </nav>
 
-        <div className="p-4 border-t border-gray-200 bg-white shrink-0">
+        <div className="p-4 border-t border-blue-800 bg-blue-900/50 shrink-0">
           {!isSidebarCollapsed ? (
-            <div className="flex items-center space-x-2 bg-blue-900 px-3 py-2 rounded-lg shadow-sm mb-3 whitespace-nowrap overflow-hidden">
+            <div className="flex items-center space-x-2 bg-blue-950 px-3 py-2 rounded-lg shadow-sm mb-3 whitespace-nowrap overflow-hidden border border-blue-800">
               {role === 'SuperAdmin' ? <ShieldAlert className="h-4 w-4 text-yellow-400 shrink-0" /> : <Shield className="h-4 w-4 text-yellow-400 shrink-0" />}
               <div className="truncate">
-                <p className="text-xs font-medium text-blue-100 truncate">Logged In</p>
+                <p className="text-xs font-medium text-blue-200 truncate">Logged In</p>
                 <p className="text-[10px] font-bold text-white uppercase tracking-wider truncate">{role}</p>
               </div>
             </div>
           ) : (
             <div className="flex justify-center mb-3">
-              <div className="w-8 h-8 rounded-lg bg-blue-900 flex items-center justify-center shadow-sm">
+              <div className="w-8 h-8 rounded-lg bg-blue-950 flex items-center justify-center shadow-sm border border-blue-800">
                 <ShieldAlert className="h-4 w-4 text-yellow-400" />
               </div>
             </div>
           )}
-          <Button onClick={handleLogout} variant="outline" className={`w-full bg-white border-gray-200 text-gray-600 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors shadow-sm ${isSidebarCollapsed ? 'px-0 justify-center' : ''}`} title={isSidebarCollapsed ? "Logout" : undefined}>
+          <Button onClick={handleLogout} variant="outline" className={`w-full bg-blue-950 border-blue-800 text-blue-200 hover:bg-red-500 hover:text-white hover:border-red-600 transition-colors shadow-sm ${isSidebarCollapsed ? 'px-0 justify-center' : ''}`} title={isSidebarCollapsed ? "Logout" : undefined}>
             <LogOut className={`h-4 w-4 ${isSidebarCollapsed ? '' : 'mr-2'}`} /> 
             {!isSidebarCollapsed && "Logout"}
           </Button>
@@ -505,19 +548,20 @@ const Index = () => {
       </aside>
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden bg-gray-50 relative z-0">
-        <header className="h-20 bg-white border-b border-gray-200 px-8 flex items-center justify-between shrink-0 shadow-sm z-10">
+        
+        <header className="h-20 bg-blue-900 border-b border-blue-800 px-8 flex items-center justify-between shrink-0 shadow-md z-10">
           <div className="flex items-center space-x-4 flex-1">
             <Button 
               variant="ghost" 
               size="icon" 
               onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
-              className="text-gray-500 hover:bg-gray-100 hover:text-blue-900 rounded-full h-9 w-9 shrink-0 transition-colors"
+              className="text-blue-200 hover:bg-blue-800 hover:text-white rounded-full h-9 w-9 shrink-0 transition-colors"
             >
               <Menu className="h-5 w-5" />
             </Button>
 
             {activeTab !== 'dashboard' && (
-              <h2 className="text-lg font-bold text-gray-900 capitalize tracking-tight min-w-max ml-2">
+              <h2 className="text-lg font-bold text-white capitalize tracking-tight min-w-max ml-2">
                 {activeTab === 'users' ? 'Identity Matrix' : activeTab.replace('-', ' ')}
               </h2>
             )}
@@ -544,7 +588,7 @@ const Index = () => {
                   onClick={() => setIsArchiveOpen(true)} 
                   variant="outline" 
                   size="icon" 
-                  className="bg-white border-gray-200 text-blue-900 hover:bg-gray-50 hover:border-gray-300 shadow-sm h-9 w-9 relative" 
+                  className="bg-blue-800 border-blue-700 text-blue-100 hover:bg-blue-700 hover:text-white shadow-sm h-9 w-9 relative transition-colors" 
                   title="Report Archive"
                 >
                   <Archive className="h-4 w-4" />
@@ -555,12 +599,12 @@ const Index = () => {
                   )}
                 </Button>
 
-                <Button onClick={handleExportData} variant="outline" size="icon" className="bg-white border-gray-200 text-gray-500 hover:text-blue-900 hover:bg-gray-50 shadow-sm h-9 w-9 transition-colors" title="Export Current View">
+                <Button onClick={handleExportData} variant="outline" size="icon" className="bg-blue-800 border-blue-700 text-blue-100 hover:text-white hover:bg-blue-700 shadow-sm h-9 w-9 transition-colors" title="Export Current View">
                     <Download className="h-4 w-4" />
                 </Button>
                 
-                <Button onClick={refreshAllData} disabled={isLoading} variant="outline" size="icon" className="bg-white border-gray-200 text-gray-500 hover:text-blue-900 hover:bg-gray-50 shadow-sm h-9 w-9 disabled:opacity-50 transition-colors" title="Refresh Engine">
-                    <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin text-blue-900' : ''}`} />
+                <Button onClick={refreshAllData} disabled={isLoading} variant="outline" size="icon" className="bg-blue-800 border-blue-700 text-blue-100 hover:text-white hover:bg-blue-700 shadow-sm h-9 w-9 disabled:opacity-50 transition-colors" title="Refresh Engine">
+                    <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin text-yellow-400' : ''}`} />
                 </Button>
             </div>
           </div>
@@ -575,23 +619,23 @@ const Index = () => {
       </main>
 
       {isArchiveOpen && (
-        <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-[100] flex items-center justify-center animate-in fade-in duration-200 p-4">
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex items-center justify-center animate-in fade-in duration-200 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
-            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-              <div className="flex items-center text-gray-900">
-                <Archive className="h-5 w-5 mr-2 text-blue-900" />
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-blue-900">
+              <div className="flex items-center text-white">
+                <Archive className="h-5 w-5 mr-2 text-yellow-400" />
                 <h2 className="text-lg font-bold">Generated Reports Archive</h2>
               </div>
-              <button onClick={() => setIsArchiveOpen(false)} className="text-gray-400 hover:text-gray-700 bg-white border border-gray-200 rounded-md p-1 shadow-sm transition-colors">
-                <X className="h-4 w-4" />
+              <button onClick={() => setIsArchiveOpen(false)} className="text-blue-200 hover:text-white transition-colors">
+                <X className="h-5 w-5" />
               </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-2 bg-gray-50/30 custom-scrollbar">
+            <div className="flex-1 overflow-y-auto p-2 bg-gray-50 custom-scrollbar">
               {savedReports.length === 0 ? (
                 <div className="py-20 flex flex-col items-center justify-center text-gray-400">
                   <FileText className="h-12 w-12 mb-3 opacity-20" />
-                  <p className="text-sm font-medium">No reports have been generated yet.</p>
+                  <p className="text-sm font-medium text-gray-500">No reports have been generated yet.</p>
                   <p className="text-xs mt-1 text-gray-400">Click the export buttons on the dashboard to archive them here.</p>
                 </div>
               ) : (
@@ -601,17 +645,17 @@ const Index = () => {
                       <div className="flex items-start">
                         <FileText className="h-8 w-8 text-yellow-100 fill-yellow-400 mr-3 shrink-0" />
                         <div>
-                          <p className="font-bold text-sm text-gray-800 truncate max-w-[300px] sm:max-w-md">{report.filename}</p>
-                          <p className="text-[10px] uppercase tracking-wider font-semibold text-gray-500 mt-1">{report.date}</p>
+                          <p className="font-bold text-sm text-blue-900 truncate max-w-[300px] sm:max-w-md">{report.filename}</p>
+                          <p className="text-[10px] uppercase tracking-wider font-bold text-gray-500 mt-1">{report.date}</p>
                         </div>
                       </div>
                       <Button 
                         onClick={() => handleReDownload(report.filename, report.content)} 
                         variant="outline" 
                         size="sm"
-                        className="bg-white text-blue-900 hover:bg-blue-50 hover:border-blue-200 border-gray-200 shadow-sm shrink-0"
+                        className="bg-white text-blue-900 hover:bg-blue-50 hover:border-blue-200 border-gray-200 shadow-sm shrink-0 font-bold"
                       >
-                        <Download className="h-3.5 w-3.5 sm:mr-2" />
+                        <Download className="h-3.5 w-3.5 sm:mr-2 text-blue-600" />
                         <span className="hidden sm:inline">Download</span>
                       </Button>
                     </div>
@@ -621,8 +665,8 @@ const Index = () => {
             </div>
             
             {savedReports.length > 0 && (
-              <div className="px-6 py-3 border-t border-gray-100 bg-gray-50 flex justify-end">
-                <Button onClick={handleClearArchive} variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700 text-xs font-semibold">
+              <div className="px-6 py-3 border-t border-gray-200 bg-white flex justify-end">
+                <Button onClick={handleClearArchive} variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700 text-xs font-bold">
                   Clear History
                 </Button>
               </div>

@@ -23,7 +23,11 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
   const handleDirectorySync = async () => {
     setIsSyncing(true);
     try {
-      await fetch('http://localhost:3000/api/users/sync', { method: 'POST' });
+      const token = localStorage.getItem('appManagerToken');
+      await fetch('http://localhost:3000/api/users/sync', { 
+        method: 'POST',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
       onRefresh(); 
     } catch (err) {
       console.error("Sync failed", err);
@@ -101,7 +105,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
     return true;
   });
 
-  // --- NEW: ADOPTION ANALYTICS ENGINE (Runs only when a system is selected) ---
+  // --- ADOPTION ANALYTICS ENGINE ---
   let adoptionMetrics = null;
   if (systemFilter !== "All") {
     let totalProvisioned = 0;
@@ -112,7 +116,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
       const sysData = user.assigned_systems?.find((s:any) => s.name === systemFilter);
       if (sysData) {
         totalProvisioned++;
-        // Reusing your mock logic: > 30 days is abandoned/idle
         const mockDaysAgo = (user.id + sysData.id * 7) % 45; 
         const isActive = mockDaysAgo <= 30;
         
@@ -148,7 +151,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
             <Users className="h-5 w-5 mr-2 text-blue-800" />
             Identity & Adoption Matrix
           </h2>
-          <p className="text-xs text-gray-500 mt-1 font-medium">Manage access and track software adoption across the municipality.</p>
+          <p className="text-sm text-gray-500 mt-1 font-medium">Manage access and track software adoption across the municipality.</p>
         </div>
         <Button 
           onClick={handleDirectorySync} 
@@ -186,7 +189,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
               onChange={handleSystemChange}
             >
               <option value="All">All Systems</option>
-              {allSystems.map(name => <option key={name as string} value={name as string}>{name as string}</option>)}
+              {allSystems.map((name, i) => <option key={`${name}-${i}`} value={name as string}>{name as string}</option>)}
             </select>
           </div>
 
@@ -198,7 +201,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
               onChange={handleUnitChange}
             >
               <option value="All">All Units</option>
-              {availableUnits.map(unit => <option key={unit} value={unit}>{unit}</option>)}
+              {availableUnits.map((unit, i) => <option key={`${unit}-${i}`} value={unit}>{unit}</option>)}
             </select>
           </div>
 
@@ -210,14 +213,14 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
               onChange={(e) => setDeptFilter(e.target.value)}
             >
               <option value="All">All Departments</option>
-              {availableDepts.map(name => <option key={name as string} value={name as string}>{name as string}</option>)}
+              {availableDepts.map((name, i) => <option key={`${name}-${i}`} value={name as string}>{name as string}</option>)}
             </select>
           </div>
 
         </div>
       </div>
 
-      {/* NEW: DYNAMIC ADOPTION ANALYTICS PANELS */}
+      {/* DYNAMIC ADOPTION ANALYTICS PANELS */}
       {adoptionMetrics && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5 shrink-0 animate-in slide-in-from-top-4 duration-300">
           
@@ -301,7 +304,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
                   return (
                     <tr key={user.id} className="hover:bg-sky-50/50 bg-white transition-colors group">
                       
-                      {/* Column 1: Identity */}
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex items-center space-x-3">
                           <div className="h-8 w-8 bg-gray-100 group-hover:bg-blue-100 rounded-full flex items-center justify-center transition-colors shadow-inner">
@@ -314,7 +316,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
                         </div>
                       </td>
 
-                      {/* Column 2: Structural Tracking */}
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex flex-col">
                           <span className="text-xs font-bold text-gray-700 flex items-center">
@@ -326,7 +327,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
                         </div>
                       </td>
 
-                      {/* Column 3: Status / Onboarding */}
                       <td className="px-6 py-4 whitespace-nowrap">
                          <div className="flex flex-col space-y-1.5">
                            <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-50 text-green-700 border border-green-200 w-fit shadow-sm">
@@ -336,11 +336,10 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
                          </div>
                       </td>
 
-                      {/* Column 4: Dense Tags for Systems with Status Indicators */}
                       <td className="px-6 py-4">
                         <div className="flex flex-wrap gap-2 max-w-md">
                           {user.assigned_systems?.length > 0 ? (
-                            user.assigned_systems.map((sys: any) => {
+                            user.assigned_systems.map((sys: any, idx: number) => {
                               
                               const mockDaysAgo = (user.id + sys.id * 7) % 45; 
                               const isAbandoned = mockDaysAgo > 30; 
@@ -353,9 +352,10 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
                                 ? `⚠️ INACTIVE: Last logged in ${mockDaysAgo} days ago` 
                                 : `✅ ACTIVE: Last logged in ${mockDaysAgo === 0 ? 'Today' : mockDaysAgo + ' days ago'}`;
 
+                              // FIXED: Using a unique key combining user ID, system name, and index
                               return (
                                 <span 
-                                  key={sys.id} 
+                                  key={`${user.id}-${sys.name || sys.id}-${idx}`} 
                                   title={hoverText}
                                   className={`${borderColor} ${textColor} px-2 py-1 rounded-md text-[10px] shadow-sm flex items-center cursor-help transition-all hover:shadow-md hover:border-sky-300`}
                                 >
