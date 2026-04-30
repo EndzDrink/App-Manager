@@ -27,25 +27,20 @@ pool.on('error', (err) => console.error('⚠️ Database Connection Error:', err
 // --- 2. ROBUST DB INITIALIZATION ---
 const initializeSystems = async () => {
   try {
-    // 1. Ensure Core Tables Exist
     await pool.query(`
       CREATE TABLE IF NOT EXISTS admin_users (
         id SERIAL PRIMARY KEY, 
         email VARCHAR(255) UNIQUE NOT NULL, 
         password_hash TEXT NOT NULL, 
-        role VARCHAR(50) DEFAULT 'SuperAdmin'
+        role VARCHAR(50) DEFAULT 'StandardUser'
       );
     `);
     
-    // SCHEMA GUARD: Ensure department_id exists in admin_users for DD roles
     await pool.query(`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS department_id INTEGER`);
-    
     await pool.query(`CREATE TABLE IF NOT EXISTS settings (id SERIAL PRIMARY KEY, monthly_budget DECIMAL DEFAULT 150000.00)`);
-    
-    // 2. Create Connectors Table if missing
     await pool.query(`CREATE TABLE IF NOT EXISTS data_connectors (id SERIAL PRIMARY KEY)`);
 
-    // 3. Create License Requests Table (For Problem 5 Fix)
+    // The EA/CRM Request Pipeline Table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS license_requests (
         id SERIAL PRIMARY KEY,
@@ -56,7 +51,29 @@ const initializeSystems = async () => {
       );
     `);
 
-    // 4. SCHEMA GUARD: Explicitly add columns for connectors
+    // The PMO Pipeline Table
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS pmo_projects (
+        id VARCHAR(50) PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        department VARCHAR(100),
+        status VARCHAR(50) DEFAULT 'Initiative',
+        stage VARCHAR(100) DEFAULT 'Scoping',
+        budget DECIMAL DEFAULT 0.00,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
+    await pool.query(`ALTER TABLE enterprise_systems ADD COLUMN IF NOT EXISTS deployment_type VARCHAR(50) DEFAULT 'External'`);
+    await pool.query(`ALTER TABLE enterprise_systems ADD COLUMN IF NOT EXISTS lifecycle_status VARCHAR(50) DEFAULT 'Standard'`);
+    
+    await pool.query(`
+      ALTER TABLE license_requests 
+      ADD COLUMN IF NOT EXISTS alignment_score INTEGER DEFAULT 0,
+      ADD COLUMN IF NOT EXISTS ea_status VARCHAR(50) DEFAULT 'Awaiting EA Vetting',
+      ADD COLUMN IF NOT EXISTS ea_comments TEXT
+    `);
+
     const columnsToEnsure = [
       { name: 'provider_name', type: 'VARCHAR(255)' },
       { name: 'api_endpoint', type: 'VARCHAR(255)' },
@@ -69,12 +86,11 @@ const initializeSystems = async () => {
       await pool.query(`ALTER TABLE data_connectors ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
     }
 
-    // 5. Seed Default Data
     const hashedPassword = await bcrypt.hash('Admin2026!', 10);
     await pool.query(`INSERT INTO admin_users (email, password_hash, role) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING`, ['admin@organization.com', hashedPassword, 'SuperAdmin']);
     await pool.query(`INSERT INTO settings (id, monthly_budget) VALUES (1, 150000.00) ON CONFLICT (id) DO NOTHING`);
 
-    console.log("✅ Database Schema Verified & Synchronized.");
+    console.log("✅ Database Schema Verified. EA/PMO/CRM Pipelines Synced.");
   } catch (err) { 
     console.error("❌ DB Initialization failed:", err.message); 
   }
@@ -87,13 +103,13 @@ const authenticateToken = (req, res, next) => {
   const token = authHeader && authHeader.split(' ')[1];
   
   if (!token || token === 'null') {
-    req.user = { role: 'SuperAdmin' }; 
+    req.user = { role: 'StandardUser' }; 
     return next();
   }
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
-      req.user = { role: 'SuperAdmin' };
+      req.user = { role: 'StandardUser' };
       return next();
     }
     req.user = user;
@@ -103,7 +119,6 @@ const authenticateToken = (req, res, next) => {
 
 // --- 4. AUTHENTICATION ROUTES ---
 
-// Manual Setup Route (curl -X POST http://localhost:3000/api/auth/setup)
 app.post('/api/auth/setup', async (req, res) => {
   try {
     const hashedPassword = await bcrypt.hash('Admin2026!', 10);
@@ -119,7 +134,6 @@ app.post('/api/auth/setup', async (req, res) => {
   }
 });
 
-// User Registration Route (For head@ and staff@ organization.com)
 app.post('/api/auth/register', async (req, res) => {
   const { email, password, role, department_id } = req.body;
   try {
@@ -219,11 +233,39 @@ app.get('/api/systems', authenticateToken, async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT s.id, s.name, s.functional_category as category, s.vendor, s.deployment_architecture as architecture, s.created_at,
+      s.deployment_type, s.lifecycle_status,
       (SELECT COUNT(*) FROM active_subscriptions sub WHERE sub.system_id = s.id AND sub.is_revoked = FALSE) as active_seats
       FROM enterprise_systems s ORDER BY s.name ASC
     `);
     res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ADD NEW SYSTEM TO CATALOG
+app.post('/api/systems', authenticateToken, async (req, res) => {
+  const { name, vendor, functional_category, deployment_architecture, deployment_type } = req.body;
+  if (!name || !functional_category) {
+    return res.status(400).json({ error: "System name and category are required." });
+  }
+
+  try {
+    const result = await pool.query(
+      `INSERT INTO enterprise_systems 
+       (name, vendor, functional_category, deployment_architecture, deployment_type) 
+       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+      [
+        name, 
+        vendor || 'Unknown Vendor', 
+        functional_category, 
+        deployment_architecture || 'Cloud', 
+        deployment_type || 'External SaaS'
+      ]
+    );
+    res.json({ success: true, system: result.rows[0] });
+  } catch (err) { 
+    console.error("❌ Failed to add system:", err.message);
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
 app.get('/api/users', authenticateToken, async (req, res) => {
@@ -336,27 +378,100 @@ app.post('/api/connectors', authenticateToken, async (req, res) => {
   }
 });
 
-app.post('/api/connectors/:id/sync', authenticateToken, async (req, res) => {
+// --- 10. EA GOVERNANCE, PMO & CRM PIPELINES ---
+
+// STAFF/CRM LOGS DEMAND
+app.post('/api/requests', authenticateToken, async (req, res) => {
+  const { system_id } = req.body;
+  const userId = req.user.id || 1; // Fallback if no user is tied to token for testing
+
   try {
-    await pool.query('UPDATE data_connectors SET last_sync = CURRENT_TIMESTAMP WHERE id = $1', [req.params.id]);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
+    const result = await pool.query(
+      'INSERT INTO license_requests (user_id, system_id, status, ea_status, request_date) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP) RETURNING id',
+      [userId, system_id, 'Pending', 'Awaiting EA Vetting']
+    );
+    res.json({ success: true, message: "Request queued for EA vetting." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-// --- 10. LICENSE REQUEST SYSTEM ---
-app.post('/api/requests', authenticateToken, async (req, res) => {
-  const { system_id, justification } = req.body;
-  const userId = req.user.id; 
+// CRM DEMAND TRACKER (My Requests)
+app.get('/api/requests/me', authenticateToken, async (req, res) => {
+  const userId = req.user.id || 1; 
+  try {
+    const r = await pool.query(`
+      SELECT lr.id, es.name as system_name, lr.status, lr.ea_status, lr.alignment_score, lr.ea_comments, lr.request_date
+      FROM license_requests lr
+      JOIN enterprise_systems es ON lr.system_id = es.id
+      WHERE lr.user_id = $1
+      ORDER BY lr.request_date DESC
+    `, [userId]);
+    res.json(r.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// CRM HEAD DEMAND HUB (All City Requests)
+app.get('/api/requests', authenticateToken, async (req, res) => {
+  try {
+    const r = await pool.query(`
+      SELECT lr.id, es.name as system, au.email as requester, 'Department' as dept, 
+             lr.ea_status as status, lr.alignment_score as score, lr.request_date,
+             EXTRACT(DAY FROM CURRENT_TIMESTAMP - lr.request_date)::text || ' Days' as timeInStage
+      FROM license_requests lr
+      JOIN enterprise_systems es ON lr.system_id = es.id
+      LEFT JOIN admin_users au ON lr.user_id = au.id
+      ORDER BY lr.request_date DESC
+    `);
+    res.json(r.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// EA VETTING ENDPOINT
+app.put('/api/requests/:id/vetting', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { alignment_score, ea_status, ea_comments } = req.body;
+
+  if (!['SuperAdmin', 'EA'].includes(req.user.role)) {
+    return res.status(403).json({ error: "Only Enterprise Architecture can score alignment." });
+  }
 
   try {
     await pool.query(
-      'INSERT INTO license_requests (user_id, system_id, status, request_date) VALUES ($1, $2, $3, CURRENT_TIMESTAMP)',
-      [userId, system_id, 'Pending']
+      `UPDATE license_requests 
+       SET alignment_score = $1, ea_status = $2, ea_comments = $3, status = $4
+       WHERE id = $5`,
+      [alignment_score, ea_status, ea_comments, ea_status === 'Vetoed' ? 'Rejected' : 'Pending', id]
     );
-    
-    console.log(`📩 Automated Alert: New license request for System ID ${system_id}`);
-    
-    res.json({ success: true, message: "Request submitted to IMU for vetting." });
+
+    // If approved, push to PMO Register automatically
+    if (ea_status === 'Approved') {
+      const reqDetails = await pool.query(`SELECT es.name, au.department_id FROM license_requests lr JOIN enterprise_systems es ON lr.system_id = es.id LEFT JOIN admin_users au ON lr.user_id = au.id WHERE lr.id = $1`, [id]);
+      
+      if (reqDetails.rowCount > 0) {
+        const pmoId = `PRJ-${new Date().getFullYear()}-${Math.floor(Math.random() * 900) + 100}`;
+        await pool.query(
+          `INSERT INTO pmo_projects (id, name, department, status, stage) VALUES ($1, $2, $3, $4, $5)`,
+          [pmoId, reqDetails.rows[0].name, 'Municipal Dept', 'Awaiting Funding', 'Budget Review']
+        );
+      }
+    }
+
+    res.json({ success: true, message: "Strategic Alignment score updated." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PMO PIPELINE
+app.get('/api/projects/pipeline', authenticateToken, async (req, res) => {
+  try {
+    const r = await pool.query(`SELECT * FROM pmo_projects ORDER BY created_at DESC`);
+    res.json(r.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

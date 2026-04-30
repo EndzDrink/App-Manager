@@ -3,15 +3,15 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Monitor, Lock } from "lucide-react";
 
-// --- DYNAMIC API URL INJECTION ---
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 interface LoginProps {
-  // CRITICAL FIX: Added deptId as an optional third argument
+  // FIXED: Prop definition now accepts the critical deptId
   onLoginSuccess: (token: string, role: string, deptId?: number) => void;
 }
 
 export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
+  // TIP: Clear these defaults once you move to production
   const [email, setEmail] = useState('admin@organization.com');
   const [password, setPassword] = useState('Admin2026!');
   const [error, setError] = useState('');
@@ -31,7 +31,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
 
       const data = await res.json();
       if (res.ok) {
-        // FIX: Passing the department ID to Index.tsx so the DD view can filter correctly
+        // FIXED: Passing all three values back to Index.tsx
         onLoginSuccess(data.token, data.user.role, data.user.deptId);
       } else {
         setError(data.error || 'Login failed');

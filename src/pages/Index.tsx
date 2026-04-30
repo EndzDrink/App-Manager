@@ -1,7 +1,11 @@
 import { useState, useEffect } from "react";
-import { MetricCard } from "@/components/MetricCard";
-import { WeeklyUsageChart } from "@/components/WeeklyUsageChart";
-import { CategoryUsageChart } from "@/components/CategoryUsageChart";
+// --- INJECTED: NEW DASHBOARD ROUTERS ---
+import { CIODashboard } from "@/components/CIODashboard";
+import { AppsDashboard } from "@/components/AppsDashboard";
+import { PMODashboard } from "@/components/PMODashboard";
+import { CRMDashboard } from "@/components/CRMDashboard"; 
+import { NetworksDashboard } from "@/components/NetworksDashboard";
+
 import { AdminTab } from "@/components/AdminTab";
 import { AppsTab } from "@/components/AppsTab";
 import { SubscriptionsTab } from "@/components/SubscriptionsTab";
@@ -9,12 +13,14 @@ import { RecommendationsTab } from "@/components/RecommendationsTab";
 import { UsersTab } from "@/components/UsersTab";
 import { AuditTab } from "@/components/AuditTab";
 import { DepartmentDetailTab } from "@/components/DepartmentDetailTab";
+import { EAStrategyTab } from "@/components/EAStrategyTab"; 
 import { Login } from "@/components/Login";
 import Footer from "@/components/Footer"; 
 import { Button } from "@/components/ui/button";
 import { 
-  CreditCard, Coins, Lightbulb, TrendingUp, TrendingDown, Lock, Server, Filter, X, 
-  Monitor, ShieldAlert, Shield, User, LogOut, Download, RefreshCw, LayoutDashboard, Users, ShieldCheck, Settings, Menu, Archive, FileText
+  CreditCard, Lightbulb, Lock, Server, Filter, X, 
+  Monitor, ShieldAlert, Shield, LogOut, Download, RefreshCw, 
+  LayoutDashboard, Users, ShieldCheck, Settings, Menu, Archive, FileText, Fingerprint
 } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -23,7 +29,6 @@ const Index = () => {
   const [token, setToken] = useState<string | null>(localStorage.getItem('appManagerToken'));
   const [role, setRole] = useState<string>(localStorage.getItem('appManagerRole') || 'StandardUser');
   
-  // NEW: Store the department ID for Deputy Directors (DD) to filter their view
   const [userDepartmentId, setUserDepartmentId] = useState<number | null>(
     localStorage.getItem('appManagerDeptId') ? parseInt(localStorage.getItem('appManagerDeptId')!) : null
   );
@@ -253,12 +258,8 @@ const Index = () => {
     }
   };
 
-  // --- INJECTED: DATA FILTERING LOGIC (Problem 3 & 5 Fix) ---
   const filteredSubscriptions = subscriptions.filter(sub => {
-    // If DD (DepartmentHead), only show their department's subs to remove guessing
     if (role === 'DepartmentHead' && sub.department_id !== userDepartmentId) return false;
-
-    // Existing BI filters
     if (biSystemFilter !== "All" && sub.name !== biSystemFilter) return false;
     if (biUnitFilter !== "All" || biDeptFilter !== "All") {
        const userForSub = users.find(u => u.assigned_systems?.some((s:any) => s.name === sub.name && s.price === sub.price));
@@ -319,65 +320,79 @@ const Index = () => {
     </div>
   );
 
+  // --- UPDATED ROLE ACCESSIBILITY ---
   const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin'] },
-    { id: 'systems', label: 'Enterprise Systems', icon: Server, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin'] },
-    { id: 'subscriptions', label: 'Subscriptions', icon: CreditCard, roles: ['DepartmentHead', 'SuperAdmin'] },
-    { id: 'users', label: 'Users & IAM', icon: Users, roles: ['DepartmentHead', 'SuperAdmin'] },
-    { id: 'recommendations', label: 'Recommendations', icon: Lightbulb, roles: ['DepartmentHead', 'SuperAdmin'] },
-    { id: 'audit', label: 'Audit & Compliance', icon: ShieldCheck, roles: ['DepartmentHead', 'SuperAdmin'] },
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin', 'EA', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
+    { id: 'systems', label: 'Enterprise Systems', icon: Server, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin', 'EA', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
+    { id: 'subscriptions', label: 'Subscriptions', icon: CreditCard, roles: ['DepartmentHead', 'SuperAdmin', 'EA', 'PMOLead'] },
+    { id: 'users', label: 'Users & IAM', icon: Users, roles: ['DepartmentHead', 'SuperAdmin', 'EA'] },
+    { id: 'recommendations', label: 'Recommendations', icon: Lightbulb, roles: ['DepartmentHead', 'SuperAdmin', 'EA', 'PMOLead', 'ApplicationsHead'] },
+    { id: 'audit', label: 'Audit & Compliance', icon: ShieldCheck, roles: ['DepartmentHead', 'SuperAdmin', 'EA'] },
+    { id: 'ea-strategy', label: 'EA Strategy', icon: Fingerprint, roles: ['SuperAdmin', 'EA'] },
     { id: 'admin', label: 'Settings', icon: Settings, roles: ['SuperAdmin'] }
   ];
 
   const visibleNavItems = navItems.filter(item => item.roles.includes(role));
 
-  const renderDashboardContent = () => (
-    <div className="animate-in fade-in duration-500 pb-12">
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        
-        <div onClick={() => { setActiveTab('systems'); setSelectedDeptId(null); }} className="cursor-pointer hover:scale-[1.02] transition-transform duration-200">
-          <MetricCard icon={<Server className="h-5 w-5" />} title={role === 'StandardUser' ? "Approved Systems" : "Filtered Systems"} value={biSystemFilter === "All" ? systems.length.toString() : "1"} subtitle={role === 'StandardUser' ? "Available in IT Catalog" : biSystemFilter === "All" ? "Org-wide Deployments" : `Isolated View`} />
-        </div>
-        
-        <div onClick={() => { setActiveTab('subscriptions'); setSelectedDeptId(null); }} className="cursor-pointer hover:scale-[1.02] transition-transform duration-200">
-          <MetricCard icon={<CreditCard className="h-5 w-5" />} title={role === 'StandardUser' ? "My Active Tools" : "Active Licenses"} value={role === 'StandardUser' ? "2" : filteredSubscriptions.length.toString()} subtitle={role === 'StandardUser' ? "Assigned to your account" : biSystemFilter === "All" ? "Procured seats" : `Seats for ${biSystemFilter}`} />
-        </div>
-        
-        {role !== 'StandardUser' && (
-          <>
-            <div onClick={() => { setActiveTab('audit'); setSelectedDeptId(null); }} className="cursor-pointer hover:scale-[1.02] transition-transform duration-200">
-              <MetricCard icon={<Coins className="h-5 w-5" />} title={biSystemFilter === "All" && biUnitFilter === "All" ? "Total Burn" : "Filtered Burn"} value={`ZAR ${filteredMonthlyCost.toFixed(2)}`} subtitle={<div className="flex items-center space-x-2"><span className={costColor}>{biSystemFilter === "All" ? `${percentUsed.toFixed(0)}% of budget` : 'Direct Cost'}</span>{biSystemFilter === "All" && trends && (<span className={`flex items-center text-[10px] font-bold ${parseFloat(trends.momChange) > 0 ? 'text-red-500' : 'text-green-500'}`}>{parseFloat(trends.momChange) > 0 ? <TrendingUp className="h-2 w-2 mr-0.5"/> : <TrendingDown className="h-2 w-2 mr-0.5"/>}{Math.abs(trends.momChange)}%</span>)}</div>} />
-            </div>
-            
-            <div onClick={() => { setActiveTab('recommendations'); setSelectedDeptId(null); }} className="cursor-pointer hover:scale-[1.02] transition-transform duration-200">
-              <MetricCard icon={<Lightbulb className="h-5 w-5" />} title="Saving Ops" value={filteredRecommendations.length.toString()} subtitle={biSystemFilter === "All" ? "Optimization identified" : `Flags for ${biSystemFilter}`} />
-            </div>
-          </>
-        )}
-      </div>
+  // --- THE TRAFFIC CONTROLLER ---
+  const renderDashboardContent = () => {
+    switch (role) {
+      case 'SuperAdmin':
+      case 'EA':
+      case 'DepartmentHead':
+        return (
+          <CIODashboard 
+            systems={systems}
+            subscriptions={filteredSubscriptions}
+            monthlyCost={filteredMonthlyCost}
+            percentUsed={percentUsed}
+            costColor={costColor}
+            trends={trends}
+            recommendations={filteredRecommendations}
+            biSystemFilter={biSystemFilter}
+            biUnitFilter={biUnitFilter}
+            biDeptFilter={biDeptFilter}
+            onSaveReport={handleSaveReportToArchive}
+            onNavigateToRecommendations={() => setActiveTab('recommendations')}
+          />
+        );
       
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch">
-        <div className="flex flex-col h-full min-h-[450px] w-full">
-          <WeeklyUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} onSaveReport={handleSaveReportToArchive} />
-        </div>
-        {role !== 'StandardUser' ? (
-           <div className="flex flex-col h-full min-h-[450px] w-full">
-             <CategoryUsageChart 
-               systemFilter={biSystemFilter} 
-               deptFilter={biDeptFilter} 
-               onNavigateToRecommendations={() => setActiveTab('recommendations')} 
-             />
-           </div>
-        ) : (
-          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-center items-center text-center h-full min-h-[450px] w-full">
-            <h3 className="font-semibold text-gray-900 mb-2">Need a new Enterprise System?</h3>
-            <p className="text-sm text-gray-500 mb-4">Check the Systems tab for approved software, or contact PMO to request a new license.</p>
-            <button className="px-4 py-2 bg-blue-900 text-yellow-400 rounded-md text-sm font-bold hover:bg-blue-800 transition-colors">Request Procurement</button>
+      case 'ApplicationsHead':
+        return <AppsDashboard systems={systems} />;
+
+      case 'PMOLead':
+        return <PMODashboard />; 
+
+      case 'CRMHead':
+        return <CRMDashboard />;
+        
+        case 'NetworksHead':
+          return <NetworksDashboard systems={systems} />; 
+
+      case 'NetworksHead':
+        return (
+          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 p-10 mt-10 max-w-4xl mx-auto bg-white rounded-xl border border-dashed border-gray-300 flex flex-col items-center text-center shadow-sm">
+            <Monitor className="h-12 w-12 text-orange-300 mb-4" />
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Network Topology & Impact</h2>
+            <p className="text-gray-500">The bandwidth alignment and latency dashboard is ready to be built.</p>
           </div>
-        )}
-      </div>
-    </div>
-  );
+        );
+
+      case 'StandardUser':
+      default:
+        return (
+          <div className="animate-in fade-in duration-500 pb-12">
+            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-center items-center text-center min-h-[450px] w-full">
+              <h3 className="font-semibold text-gray-900 mb-2">Need a new Enterprise System?</h3>
+              <p className="text-sm text-gray-500 mb-4">Check the Systems tab to access the CRM Demand Tracker, or request a custom build.</p>
+              <Button onClick={() => setActiveTab('systems')} className="px-4 py-2 bg-blue-900 text-yellow-400 font-bold hover:bg-blue-800 transition-colors">
+                Access Procurement
+              </Button>
+            </div>
+          </div>
+        );
+    }
+  };
 
   const renderTabContent = () => {
     if (selectedDeptId && deptDetails) {
@@ -388,15 +403,15 @@ const Index = () => {
     switch (activeTab) {
       case "admin": return role === 'SuperAdmin' ? <AdminTab onRefresh={refreshAllData} onExport={handleExportData} budget={budget} onUpdateBudget={handleUpdateBudget} connectors={connectors} onAddConnector={handleAddConnector} stats={{ totalApps: systems.length, activeSubscriptions: subscriptions.length, recommendations: recommendations.length, monthlyCost }} /> : <UnauthorizedView />;
       case "systems": return <AppsTab apps={systems} onAddApp={refreshAllData} />; 
-      case "subscriptions": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? <SubscriptionsTab subscriptions={subscriptions} onAddSubscription={refreshAllData} /> : <UnauthorizedView />;
-      case "audit": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? 
+      case "subscriptions": return ['SuperAdmin', 'DepartmentHead', 'EA', 'PMOLead'].includes(role) ? <SubscriptionsTab subscriptions={subscriptions} onAddSubscription={refreshAllData} /> : <UnauthorizedView />;
+      case "audit": return ['SuperAdmin', 'DepartmentHead', 'EA'].includes(role) ? 
         <AuditTab 
             duplications={duplications} 
             deptSpend={deptSpend} 
             onDepartmentClick={handleDepartmentClick} 
             systems={systems} 
         /> : <UnauthorizedView />;
-      case "recommendations": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? 
+      case "recommendations": return ['SuperAdmin', 'DepartmentHead', 'EA', 'PMOLead', 'ApplicationsHead'].includes(role) ? 
         <RecommendationsTab 
             recommendations={recommendations} 
             onReclaim={handleReclaim} 
@@ -407,7 +422,8 @@ const Index = () => {
                 setBiDeptFilter('All');
             }}
         /> : <UnauthorizedView />;
-      case "users": return ['SuperAdmin', 'DepartmentHead'].includes(role) ? <UsersTab users={users} onRefresh={refreshAllData} /> : <UnauthorizedView />;
+      case "users": return ['SuperAdmin', 'DepartmentHead', 'EA'].includes(role) ? <UsersTab users={users} onRefresh={refreshAllData} /> : <UnauthorizedView />;
+      case "ea-strategy": return ['SuperAdmin', 'EA'].includes(role) ? <EAStrategyTab /> : <UnauthorizedView />;
       default: return renderDashboardContent();
     }
   };
@@ -461,7 +477,7 @@ const Index = () => {
             </div>
           </div>
           
-          {role !== 'StandardUser' && (
+          {['SuperAdmin', 'DepartmentHead', 'EA'].includes(role) && (
             <div className="flex items-center ml-8">
               {renderTripleTierFilters()}
             </div>
@@ -566,7 +582,7 @@ const Index = () => {
               </h2>
             )}
             
-            {activeTab === 'dashboard' && role !== 'StandardUser' && (
+            {activeTab === 'dashboard' && ['SuperAdmin', 'DepartmentHead', 'EA'].includes(role) && (
               <div className="ml-2">
                 {renderTripleTierFilters()}
               </div>
