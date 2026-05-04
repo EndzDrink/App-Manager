@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { 
   Server, Plus, ArrowLeft, ShieldAlert, CheckCircle2, Users, Filter, X, 
-  Search, Building2, Cloud, HardDrive, AlertTriangle, Activity, Fingerprint, Clock, XCircle 
+  Search, Building2, Cloud, HardDrive, AlertTriangle, Activity, Fingerprint, Clock, XCircle, ChevronDown 
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -33,6 +33,7 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
   // --- CRM DEMAND TRACKER STATES ---
   const [myRequests, setMyRequests] = useState<any[]>([]);
   const [isRequesting, setIsRequesting] = useState<number | null>(null);
+  const [isPipelineOpen, setIsPipelineOpen] = useState(false);
 
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
@@ -56,6 +57,11 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
   useEffect(() => {
     fetchMyRequests();
   }, []);
+
+  // Auto-open or auto-close the pipeline based on contents
+  useEffect(() => {
+    setIsPipelineOpen(myRequests.length > 0);
+  }, [myRequests.length]);
 
   const handleRequestLicense = async (systemId: number) => {
     setIsRequesting(systemId);
@@ -283,53 +289,64 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
   return (
     <div className="animate-in fade-in duration-500 max-w-7xl space-y-8">
       
-      {/* 1. CRM DEMAND TRACKER (Injected) */}
-      <div className="space-y-4">
-        <h2 className="text-lg font-bold text-blue-900 flex items-center tracking-tight">
-          <Activity className="h-5 w-5 mr-2 text-blue-600" /> 
-          My Procurement Pipeline
-        </h2>
-        
-        {myRequests.length === 0 ? (
-          <div className="p-6 bg-white border-dashed border-2 border-gray-200 rounded-xl flex flex-col items-center justify-center text-center">
-            <ShieldAlert className="h-6 w-6 text-gray-300 mb-2" />
-            <p className="text-sm font-bold text-gray-500">No Active Requests</p>
-            <p className="text-xs text-gray-400 mt-1">Your system requests will be tracked here through EA vetting and PMO funding.</p>
+      {/* 1. CRM DEMAND TRACKER (Collapsible) */}
+      <div className="bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden">
+        <button 
+          onClick={() => setIsPipelineOpen(!isPipelineOpen)}
+          className="w-full flex items-center justify-between p-4 bg-gray-50 hover:bg-gray-100 transition-colors"
+        >
+          <div className="flex items-center">
+            <Activity className="h-5 w-5 mr-2 text-blue-600" />
+            <h2 className="text-lg font-bold text-blue-900 tracking-tight">My Procurement Pipeline</h2>
+            <span className={`ml-3 text-[10px] font-bold px-2.5 py-0.5 rounded-full ${myRequests.length > 0 ? 'bg-blue-200 text-blue-900' : 'bg-gray-200 text-gray-600'}`}>
+              {myRequests.length} {myRequests.length === 1 ? 'Request' : 'Requests'}
+            </span>
           </div>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {myRequests.map((req) => (
-              <div key={req.id} className="p-4 border border-gray-200 rounded-xl bg-white shadow-sm hover:shadow-md transition-shadow">
-                <div className="flex justify-between items-start mb-3">
-                  <div className="flex items-center space-x-2">
-                    {getStatusIcon(req.ea_status)}
-                    <h3 className="font-bold text-gray-900 text-sm truncate max-w-[150px]" title={req.system_name}>{req.system_name}</h3>
-                  </div>
-                  <span className={`text-[10px] font-bold px-2 py-1 rounded border uppercase ${getStatusBadgeClass(req.ea_status)}`}>
-                    {req.ea_status}
-                  </span>
-                </div>
-                
-                <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 space-y-2 border border-gray-100">
-                  <div className="flex justify-between items-center border-b border-gray-200 pb-2">
-                    <span className="flex items-center"><Fingerprint className="h-3 w-3 mr-1"/> EA Alignment Score:</span>
-                    <span className={`font-bold ${req.alignment_score > 70 ? 'text-green-600' : req.alignment_score > 0 ? 'text-red-600' : 'text-gray-400'}`}>
-                      {req.alignment_score > 0 ? `${req.alignment_score}%` : 'Pending'}
-                    </span>
-                  </div>
-                  {req.ea_comments && (
-                    <div className="italic text-gray-500 pt-1 line-clamp-2" title={req.ea_comments}>
-                      "{req.ea_comments}"
-                    </div>
-                  )}
-                </div>
+          <ChevronDown className={`h-5 w-5 text-gray-500 transition-transform duration-200 ${isPipelineOpen ? 'rotate-180' : ''}`} />
+        </button>
+
+        {isPipelineOpen && (
+          <div className="p-4 border-t border-gray-200 bg-white">
+            {myRequests.length === 0 ? (
+              <div className="py-8 flex flex-col items-center justify-center text-center">
+                <ShieldAlert className="h-6 w-6 text-gray-300 mb-2" />
+                <p className="text-sm font-bold text-gray-500">No Active Requests</p>
+                <p className="text-xs text-gray-400 mt-1">Your system requests will be tracked here through EA vetting and PMO funding.</p>
               </div>
-            ))}
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                {myRequests.map((req) => (
+                  <div key={req.id} className="p-4 border border-gray-200 rounded-xl bg-white shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex justify-between items-start mb-3">
+                      <div className="flex items-center space-x-2">
+                        {getStatusIcon(req.ea_status)}
+                        <h3 className="font-bold text-gray-900 text-sm truncate max-w-[150px]" title={req.system_name}>{req.system_name}</h3>
+                      </div>
+                      <span className={`text-[10px] font-bold px-2 py-1 rounded border uppercase ${getStatusBadgeClass(req.ea_status)}`}>
+                        {req.ea_status}
+                      </span>
+                    </div>
+                    
+                    <div className="bg-gray-50 rounded-lg p-3 text-xs text-gray-600 space-y-2 border border-gray-100">
+                      <div className="flex justify-between items-center border-b border-gray-200 pb-2">
+                        <span className="flex items-center"><Fingerprint className="h-3 w-3 mr-1"/> EA Alignment Score:</span>
+                        <span className={`font-bold ${req.alignment_score > 70 ? 'text-green-600' : req.alignment_score > 0 ? 'text-red-600' : 'text-gray-400'}`}>
+                          {req.alignment_score > 0 ? `${req.alignment_score}%` : 'Pending'}
+                        </span>
+                      </div>
+                      {req.ea_comments && (
+                        <div className="italic text-gray-500 pt-1 line-clamp-2" title={req.ea_comments}>
+                          "{req.ea_comments}"
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
-
-      <hr className="border-gray-200" />
 
       {/* 2. CATALOG HEADER & ADD FORM */}
       <div>

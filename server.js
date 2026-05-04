@@ -40,6 +40,13 @@ const initializeSystems = async () => {
     await pool.query(`CREATE TABLE IF NOT EXISTS settings (id SERIAL PRIMARY KEY, monthly_budget DECIMAL DEFAULT 150000.00)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS data_connectors (id SERIAL PRIMARY KEY)`);
 
+    // Ensure usage_logs exists for escalation and telemetry
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS usage_logs (
+        id SERIAL PRIMARY KEY
+      );
+    `);
+
     // The EA/CRM Request Pipeline Table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS license_requests (
@@ -51,11 +58,11 @@ const initializeSystems = async () => {
       );
     `);
 
-    // The PMO Pipeline Table
+    // The PMO Pipeline Table (UPDATED to project_name)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pmo_projects (
         id VARCHAR(50) PRIMARY KEY,
-        name VARCHAR(255) NOT NULL,
+        project_name VARCHAR(255) NOT NULL,
         department VARCHAR(100),
         status VARCHAR(50) DEFAULT 'Initiative',
         stage VARCHAR(100) DEFAULT 'Scoping',
@@ -63,6 +70,36 @@ const initializeSystems = async () => {
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    // SCHEMA GUARD: Repair PMO Projects table if columns are missing
+    const pmoColumns = [
+      { name: 'project_name', type: 'VARCHAR(255)' },
+      { name: 'department', type: 'VARCHAR(100)' },
+      { name: 'status', type: "VARCHAR(50) DEFAULT 'Initiative'" },
+      { name: 'stage', type: "VARCHAR(100) DEFAULT 'Scoping'" },
+      { name: 'budget', type: 'DECIMAL DEFAULT 0.00' },
+      { name: 'created_at', type: 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' }
+    ];
+
+    for (const col of pmoColumns) {
+      await pool.query(`ALTER TABLE pmo_projects ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
+    }
+
+    // SCHEMA GUARD: Repair Usage Logs table and drop restrictive constraints for global events
+    const usageColumns = [
+      { name: 'user_id', type: 'INTEGER' },
+      { name: 'app_id', type: 'INTEGER' },
+      { name: 'action', type: 'TEXT' },
+      { name: 'duration_minutes', type: 'INTEGER' },
+      { name: 'log_date', type: 'DATE DEFAULT CURRENT_DATE' }
+    ];
+
+    for (const col of usageColumns) {
+      await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
+    }
+    
+    await pool.query(`ALTER TABLE usage_logs DROP CONSTRAINT IF EXISTS usage_logs_app_id_fkey`);
+    await pool.query(`ALTER TABLE usage_logs DROP CONSTRAINT IF EXISTS usage_logs_user_id_fkey`);
 
     await pool.query(`ALTER TABLE enterprise_systems ADD COLUMN IF NOT EXISTS deployment_type VARCHAR(50) DEFAULT 'External'`);
     await pool.query(`ALTER TABLE enterprise_systems ADD COLUMN IF NOT EXISTS lifecycle_status VARCHAR(50) DEFAULT 'Standard'`);
@@ -174,32 +211,57 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Login crash" }); }
 });
 
-// --- 5. CORE METRICS ---
+// --- 5. CORE METRICS (WITH EA RBAC ENFORCEMENT) ---
 app.get('/api/metrics/monthly-cost', authenticateToken, async (req, res) => {
   try {
-    const r = await pool.query('SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE is_revoked = FALSE');
+    let query = 'SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE is_revoked = FALSE';
+    let params = [];
+    if (req.user.role === 'DepartmentHead' && req.user.deptId) {
+      query += ' AND owning_department_id = $1';
+      params.push(req.user.deptId);
+    }
+    const r = await pool.query(query, params);
     res.json({ total: parseFloat(r.rows[0].total || 0) });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/metrics/trends', authenticateToken, async (req, res) => {
   try {
-    const spendRes = await pool.query('SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE is_revoked = FALSE');
-    const budgetRes = await pool.query('SELECT SUM(allocated_budget) as total FROM departments');
+    let spendQ = 'SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE is_revoked = FALSE';
+    let budgetQ = 'SELECT SUM(allocated_budget) as total FROM departments';
+    let params = [];
+
+    if (req.user.role === 'DepartmentHead' && req.user.deptId) {
+      spendQ += ' AND owning_department_id = $1';
+      budgetQ += ' WHERE id = $1';
+      params.push(req.user.deptId);
+    }
+
+    const spendRes = await pool.query(spendQ, params);
+    const budgetRes = await pool.query(budgetQ, params);
+    
     const currentSpend = parseFloat(spendRes.rows[0].total || 0);
     const totalBudget = parseFloat(budgetRes.rows[0].total || 0);
     const variance = totalBudget > 0 ? ((currentSpend / totalBudget) * 100).toFixed(1) : 0;
+    
     res.json({ currentSpend, momChange: variance, totalBudget });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/metrics/departmental-spend', authenticateToken, async (req, res) => {
   try {
-    const r = await pool.query(`
+    let query = `
       SELECT d.id, d.name as department, COALESCE(SUM(s.monthly_cost), 0) as total_spend, d.allocated_budget as budget_limit
       FROM departments d LEFT JOIN active_subscriptions s ON d.id = s.owning_department_id AND s.is_revoked = FALSE
-      GROUP BY d.id, d.name, d.allocated_budget ORDER BY total_spend DESC
-    `);
+    `;
+    let params = [];
+    if (req.user.role === 'DepartmentHead' && req.user.deptId) {
+      query += ' WHERE d.id = $1';
+      params.push(req.user.deptId);
+    }
+    query += ' GROUP BY d.id, d.name, d.allocated_budget ORDER BY total_spend DESC';
+
+    const r = await pool.query(query, params);
     res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -228,7 +290,7 @@ app.get('/api/metrics/usage/category', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- 7. CATALOG & IDENTITY ---
+// --- 7. CATALOG & IDENTITY (WITH EA RBAC ENFORCEMENT) ---
 app.get('/api/systems', authenticateToken, async (req, res) => {
   try {
     const r = await pool.query(`
@@ -241,7 +303,6 @@ app.get('/api/systems', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// ADD NEW SYSTEM TO CATALOG
 app.post('/api/systems', authenticateToken, async (req, res) => {
   const { name, vendor, functional_category, deployment_architecture, deployment_type } = req.body;
   if (!name || !functional_category) {
@@ -270,22 +331,37 @@ app.post('/api/systems', authenticateToken, async (req, res) => {
 
 app.get('/api/users', authenticateToken, async (req, res) => {
   try {
-    const r = await pool.query(`
+    let query = `
       SELECT p.id, p.email, d.name as department, TO_CHAR(p.onboarding_date, 'YYYY-MM-DD') as onboarding_date,
       COALESCE(json_agg(json_build_object('name', es.name, 'price', s.monthly_cost)) FILTER (WHERE es.id IS NOT NULL AND s.is_revoked = FALSE), '[]') as assigned_systems
       FROM personnel p LEFT JOIN departments d ON p.department_id = d.id LEFT JOIN active_subscriptions s ON p.id = s.assigned_user_id
-      LEFT JOIN enterprise_systems es ON s.system_id = es.id GROUP BY p.id, d.name
-    `);
+      LEFT JOIN enterprise_systems es ON s.system_id = es.id
+    `;
+    let params = [];
+    if (req.user.role === 'DepartmentHead' && req.user.deptId) {
+      query += ' WHERE p.department_id = $1';
+      params.push(req.user.deptId);
+    }
+    query += ' GROUP BY p.id, d.name';
+
+    const r = await pool.query(query, params);
     res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.get('/api/subscriptions', authenticateToken, async (req, res) => {
   try {
-    const r = await pool.query(`
+    let query = `
       SELECT s.id, es.name, es.functional_category as category, s.monthly_cost as price, TO_CHAR(s.start_date, 'YYYY-MM-DD') as start_date, s.associated_project as project_name
       FROM active_subscriptions s JOIN enterprise_systems es ON s.system_id = es.id WHERE s.is_revoked = FALSE
-    `);
+    `;
+    let params = [];
+    if (req.user.role === 'DepartmentHead' && req.user.deptId) {
+      query += ' AND s.owning_department_id = $1';
+      params.push(req.user.deptId);
+    }
+
+    const r = await pool.query(query, params);
     res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -293,11 +369,19 @@ app.get('/api/subscriptions', authenticateToken, async (req, res) => {
 // --- 8. RECOMMENDATIONS ---
 app.get('/api/recommendations', authenticateToken, async (req, res) => {
   try {
-    const r = await pool.query(`
+    let query = `
       SELECT s.id, es.name, s.monthly_cost 
       FROM active_subscriptions s JOIN enterprise_systems es ON s.system_id = es.id 
-      WHERE s.is_revoked = FALSE ORDER BY s.monthly_cost DESC LIMIT 3
-    `);
+      WHERE s.is_revoked = FALSE
+    `;
+    let params = [];
+    if (req.user.role === 'DepartmentHead' && req.user.deptId) {
+      query += ' AND s.owning_department_id = $1';
+      params.push(req.user.deptId);
+    }
+    query += ' ORDER BY s.monthly_cost DESC LIMIT 3';
+
+    const r = await pool.query(query, params);
     const recommendations = r.rows.map(row => ({
       id: row.id, title: `Optimize ${row.name}`, description: `Potential monthly saving of ZAR ${row.monthly_cost} identified.`, impact: "High"
     }));
@@ -312,7 +396,7 @@ app.get('/api/ai/insights', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- 9. MISC, AUDIT & CONNECTORS ---
+// --- 9. MISC, AUDIT & CONNECTORS (WITH EA RBAC ENFORCEMENT) ---
 app.get('/api/settings', authenticateToken, async (req, res) => {
   try {
     const r = await pool.query('SELECT monthly_budget FROM settings LIMIT 1');
@@ -329,6 +413,10 @@ app.put('/api/settings', authenticateToken, async (req, res) => {
 });
 
 app.get('/api/audit/duplication', authenticateToken, async (req, res) => {
+  if (!['SuperAdmin', 'EA'].includes(req.user.role)) {
+    return res.status(403).json({ error: "Access Denied: Global Audit is restricted to Enterprise Architecture." });
+  }
+  
   try {
     const r = await pool.query(`SELECT functional_category as category, ARRAY_AGG(DISTINCT name) as systems FROM enterprise_systems GROUP BY functional_category HAVING COUNT(*) > 1`);
     res.json(r.rows);
@@ -338,6 +426,11 @@ app.get('/api/audit/duplication', authenticateToken, async (req, res) => {
 app.get('/api/departments/:id/details', authenticateToken, async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (req.user.role === 'DepartmentHead' && req.user.deptId !== parseInt(id)) {
+      return res.status(403).json({ error: "Access Denied: Enterprise Architecture Governance prevents cross-departmental data access." });
+    }
+
     const deptRes = await pool.query('SELECT id, name, allocated_budget FROM departments WHERE id = $1', [id]);
     if (deptRes.rowCount === 0) return res.status(404).json({ error: "Dept not found" });
 
@@ -380,10 +473,27 @@ app.post('/api/connectors', authenticateToken, async (req, res) => {
 
 // --- 10. EA GOVERNANCE, PMO & CRM PIPELINES ---
 
-// STAFF/CRM LOGS DEMAND
+app.post('/api/pmo/escalate', authenticateToken, async (req, res) => {
+  const { project_id, reason } = req.body;
+  const userId = req.user.id || null; 
+
+  try {
+    await pool.query(
+      `INSERT INTO usage_logs (user_id, app_id, action, duration_minutes, log_date) 
+       VALUES ($1, $2, $3, $4, CURRENT_DATE)`,
+      [userId, null, `ESCALATION: Project ${project_id} - ${reason || 'Funding Bottleneck'}`, 0]
+    );
+
+    console.log(`🚨 CIO ALERT: Project ${project_id} has been escalated for executive review.`);
+    res.json({ success: true, message: "Escalated to CIO successfully." });
+  } catch (err) {
+    res.status(500).json({ error: "Escalation failed: " + err.message });
+  }
+});
+
 app.post('/api/requests', authenticateToken, async (req, res) => {
   const { system_id } = req.body;
-  const userId = req.user.id || 1; // Fallback if no user is tied to token for testing
+  const userId = req.user.id || 1; 
 
   try {
     const result = await pool.query(
@@ -396,7 +506,6 @@ app.post('/api/requests', authenticateToken, async (req, res) => {
   }
 });
 
-// CRM DEMAND TRACKER (My Requests)
 app.get('/api/requests/me', authenticateToken, async (req, res) => {
   const userId = req.user.id || 1; 
   try {
@@ -413,25 +522,32 @@ app.get('/api/requests/me', authenticateToken, async (req, res) => {
   }
 });
 
-// CRM HEAD DEMAND HUB (All City Requests)
 app.get('/api/requests', authenticateToken, async (req, res) => {
   try {
-    const r = await pool.query(`
+    let query = `
       SELECT lr.id, es.name as system, au.email as requester, 'Department' as dept, 
              lr.ea_status as status, lr.alignment_score as score, lr.request_date,
              EXTRACT(DAY FROM CURRENT_TIMESTAMP - lr.request_date)::text || ' Days' as timeInStage
       FROM license_requests lr
       JOIN enterprise_systems es ON lr.system_id = es.id
       LEFT JOIN admin_users au ON lr.user_id = au.id
-      ORDER BY lr.request_date DESC
-    `);
+    `;
+    let params = [];
+    
+    if (req.user.role === 'DepartmentHead' && req.user.deptId) {
+      query += ' WHERE au.department_id = $1';
+      params.push(req.user.deptId);
+    }
+    
+    query += ' ORDER BY lr.request_date DESC';
+
+    const r = await pool.query(query, params);
     res.json(r.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
 
-// EA VETTING ENDPOINT
 app.put('/api/requests/:id/vetting', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { alignment_score, ea_status, ea_comments } = req.body;
@@ -448,14 +564,14 @@ app.put('/api/requests/:id/vetting', authenticateToken, async (req, res) => {
       [alignment_score, ea_status, ea_comments, ea_status === 'Vetoed' ? 'Rejected' : 'Pending', id]
     );
 
-    // If approved, push to PMO Register automatically
+    // If approved, push to PMO Register automatically (UPDATED to project_name)
     if (ea_status === 'Approved') {
       const reqDetails = await pool.query(`SELECT es.name, au.department_id FROM license_requests lr JOIN enterprise_systems es ON lr.system_id = es.id LEFT JOIN admin_users au ON lr.user_id = au.id WHERE lr.id = $1`, [id]);
       
       if (reqDetails.rowCount > 0) {
         const pmoId = `PRJ-${new Date().getFullYear()}-${Math.floor(Math.random() * 900) + 100}`;
         await pool.query(
-          `INSERT INTO pmo_projects (id, name, department, status, stage) VALUES ($1, $2, $3, $4, $5)`,
+          `INSERT INTO pmo_projects (id, project_name, department, status, stage) VALUES ($1, $2, $3, $4, $5)`,
           [pmoId, reqDetails.rows[0].name, 'Municipal Dept', 'Awaiting Funding', 'Budget Review']
         );
       }
@@ -467,7 +583,6 @@ app.put('/api/requests/:id/vetting', authenticateToken, async (req, res) => {
   }
 });
 
-// PMO PIPELINE
 app.get('/api/projects/pipeline', authenticateToken, async (req, res) => {
   try {
     const r = await pool.query(`SELECT * FROM pmo_projects ORDER BY created_at DESC`);

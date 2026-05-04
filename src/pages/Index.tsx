@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-// --- INJECTED: NEW DASHBOARD ROUTERS ---
 import { CIODashboard } from "@/components/CIODashboard";
 import { AppsDashboard } from "@/components/AppsDashboard";
 import { PMODashboard } from "@/components/PMODashboard";
@@ -33,7 +32,7 @@ const Index = () => {
     localStorage.getItem('appManagerDeptId') ? parseInt(localStorage.getItem('appManagerDeptId')!) : null
   );
 
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const [activeTab, setActiveTab] = useState(role === 'StandardUser' ? 'systems' : 'dashboard');
   const [isLiveMode, setIsLiveMode] = useState<boolean>(false);
   
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
@@ -76,17 +75,32 @@ const Index = () => {
     setToken(newToken);
     setRole(newRole);
     if (deptId) setUserDepartmentId(deptId);
+    
+    // Auto-route based on blueprint
+    setActiveTab(newRole === 'StandardUser' ? 'systems' : 'dashboard');
   };
 
+  // --- UPDATED ROLE ACCESSIBILITY MATRIX (THE EA BLUEPRINT) ---
+  const navItems = [
+    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
+    { id: 'systems', label: 'Enterprise Catalog', icon: Server, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin', 'EA', 'CIO', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
+    { id: 'subscriptions', label: 'Subscriptions', icon: CreditCard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead'] },
+    { id: 'users', label: 'Identity Matrix', icon: Users, roles: ['SuperAdmin', 'EA', 'DepartmentHead'] },
+    { id: 'recommendations', label: 'Recommendations', icon: Lightbulb, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead', 'ApplicationsHead'] },
+    { id: 'audit', label: 'Audit & Compliance', icon: ShieldCheck, roles: ['SuperAdmin', 'EA'] }, // Locked to EA only
+    { id: 'ea-strategy', label: 'EA Strategy', icon: Fingerprint, roles: ['SuperAdmin', 'EA'] },
+    { id: 'admin', label: 'Settings', icon: Settings, roles: ['SuperAdmin'] } // EA DD Apex control
+  ];
+
+  const visibleNavItems = navItems.filter(item => item.roles.includes(role));
+
+  // Ensure users can't URL-hack into tabs they don't own
   useEffect(() => {
-    if (role === 'StandardUser' && !['dashboard', 'systems'].includes(activeTab)) {
-      setActiveTab('dashboard');
+    if (visibleNavItems.length > 0 && !visibleNavItems.find(item => item.id === activeTab)) {
+      setActiveTab(visibleNavItems[0].id);
       setSelectedDeptId(null);
     }
-    if (role === 'DepartmentHead' && activeTab === 'admin') {
-      setActiveTab('dashboard');
-    }
-  }, [role, activeTab]);
+  }, [role, activeTab, visibleNavItems]);
 
   const fetchWithAuth = async (endpoint: string, options: RequestInit = {}) => {
     const currentToken = localStorage.getItem('appManagerToken');
@@ -150,7 +164,14 @@ const Index = () => {
   };
 
   const fetchTrends = async () => { const res = await fetchWithAuth('/api/metrics/trends'); if (res.ok) setTrends(await res.json()); };
-  const fetchAuditData = async () => { const [dupRes, deptRes] = await Promise.all([fetchWithAuth('/api/audit/duplication'), fetchWithAuth('/api/metrics/departmental-spend')]); if (dupRes.ok) setDuplications(await dupRes.json()); if (deptRes.ok) setDeptSpend(await deptRes.json()); };
+  const fetchAuditData = async () => { 
+    // Only attempt to fetch global audit if the user is EA/SuperAdmin
+    if (['SuperAdmin', 'EA'].includes(role)) {
+      const [dupRes, deptRes] = await Promise.all([fetchWithAuth('/api/audit/duplication'), fetchWithAuth('/api/metrics/departmental-spend')]); 
+      if (dupRes.ok) setDuplications(await dupRes.json()); 
+      if (deptRes.ok) setDeptSpend(await deptRes.json()); 
+    }
+  };
   const fetchUsers = async () => { const res = await fetchWithAuth('/api/users'); if (res.ok) setUsers(await res.json()); };
   const fetchConnectors = async () => { const res = await fetchWithAuth('/api/connectors'); if (res.ok) setConnectors(await res.json()); };
   const fetchSettings = async () => { const res = await fetchWithAuth('/api/settings'); if (res.ok) { const d = await res.json(); setBudget(parseFloat(d.monthly_budget)); } };
@@ -320,26 +341,15 @@ const Index = () => {
     </div>
   );
 
-  // --- UPDATED ROLE ACCESSIBILITY ---
-  const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin', 'EA', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
-    { id: 'systems', label: 'Enterprise Systems', icon: Server, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin', 'EA', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
-    { id: 'subscriptions', label: 'Subscriptions', icon: CreditCard, roles: ['DepartmentHead', 'SuperAdmin', 'EA', 'PMOLead'] },
-    { id: 'users', label: 'Users & IAM', icon: Users, roles: ['DepartmentHead', 'SuperAdmin', 'EA'] },
-    { id: 'recommendations', label: 'Recommendations', icon: Lightbulb, roles: ['DepartmentHead', 'SuperAdmin', 'EA', 'PMOLead', 'ApplicationsHead'] },
-    { id: 'audit', label: 'Audit & Compliance', icon: ShieldCheck, roles: ['DepartmentHead', 'SuperAdmin', 'EA'] },
-    { id: 'ea-strategy', label: 'EA Strategy', icon: Fingerprint, roles: ['SuperAdmin', 'EA'] },
-    { id: 'admin', label: 'Settings', icon: Settings, roles: ['SuperAdmin'] }
-  ];
-
-  const visibleNavItems = navItems.filter(item => item.roles.includes(role));
-
   // --- THE TRAFFIC CONTROLLER ---
   const renderDashboardContent = () => {
     switch (role) {
       case 'SuperAdmin':
       case 'EA':
+      case 'CIO':
       case 'DepartmentHead':
+        // Department Head safely receives this dashboard because the backend 
+        // physically filters their monthlyCost, trends, and subscriptions.
         return (
           <CIODashboard 
             systems={systems}
@@ -365,21 +375,13 @@ const Index = () => {
 
       case 'CRMHead':
         return <CRMDashboard />;
-        
-        case 'NetworksHead':
-          return <NetworksDashboard systems={systems} />; 
 
       case 'NetworksHead':
-        return (
-          <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 p-10 mt-10 max-w-4xl mx-auto bg-white rounded-xl border border-dashed border-gray-300 flex flex-col items-center text-center shadow-sm">
-            <Monitor className="h-12 w-12 text-orange-300 mb-4" />
-            <h2 className="text-xl font-bold text-gray-900 mb-2">Network Topology & Impact</h2>
-            <p className="text-gray-500">The bandwidth alignment and latency dashboard is ready to be built.</p>
-          </div>
-        );
+        return <NetworksDashboard systems={systems} />; 
 
       case 'StandardUser':
       default:
+        // StandardUsers should be auto-routed to 'systems', but this acts as a fallback
         return (
           <div className="animate-in fade-in duration-500 pb-12">
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-center items-center text-center min-h-[450px] w-full">
@@ -403,15 +405,15 @@ const Index = () => {
     switch (activeTab) {
       case "admin": return role === 'SuperAdmin' ? <AdminTab onRefresh={refreshAllData} onExport={handleExportData} budget={budget} onUpdateBudget={handleUpdateBudget} connectors={connectors} onAddConnector={handleAddConnector} stats={{ totalApps: systems.length, activeSubscriptions: subscriptions.length, recommendations: recommendations.length, monthlyCost }} /> : <UnauthorizedView />;
       case "systems": return <AppsTab apps={systems} onAddApp={refreshAllData} />; 
-      case "subscriptions": return ['SuperAdmin', 'DepartmentHead', 'EA', 'PMOLead'].includes(role) ? <SubscriptionsTab subscriptions={subscriptions} onAddSubscription={refreshAllData} /> : <UnauthorizedView />;
-      case "audit": return ['SuperAdmin', 'DepartmentHead', 'EA'].includes(role) ? 
+      case "subscriptions": return ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead'].includes(role) ? <SubscriptionsTab subscriptions={subscriptions} onAddSubscription={refreshAllData} /> : <UnauthorizedView />;
+      case "audit": return ['SuperAdmin', 'EA'].includes(role) ? 
         <AuditTab 
             duplications={duplications} 
             deptSpend={deptSpend} 
             onDepartmentClick={handleDepartmentClick} 
             systems={systems} 
         /> : <UnauthorizedView />;
-      case "recommendations": return ['SuperAdmin', 'DepartmentHead', 'EA', 'PMOLead', 'ApplicationsHead'].includes(role) ? 
+      case "recommendations": return ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead', 'ApplicationsHead'].includes(role) ? 
         <RecommendationsTab 
             recommendations={recommendations} 
             onReclaim={handleReclaim} 
@@ -422,7 +424,7 @@ const Index = () => {
                 setBiDeptFilter('All');
             }}
         /> : <UnauthorizedView />;
-      case "users": return ['SuperAdmin', 'DepartmentHead', 'EA'].includes(role) ? <UsersTab users={users} onRefresh={refreshAllData} /> : <UnauthorizedView />;
+      case "users": return ['SuperAdmin', 'EA', 'DepartmentHead'].includes(role) ? <UsersTab users={users} onRefresh={refreshAllData} /> : <UnauthorizedView />;
       case "ea-strategy": return ['SuperAdmin', 'EA'].includes(role) ? <EAStrategyTab /> : <UnauthorizedView />;
       default: return renderDashboardContent();
     }
@@ -472,7 +474,7 @@ const Index = () => {
               <Monitor className="h-5 w-5 text-blue-900" />
             </div>
             <div>
-              <h1 className="text-lg font-bold text-white leading-tight">Executive Presentation Mode</h1>
+              <h1 className="text-lg font-bold text-white leading-tight">Presentation Mode</h1>
               <p className="text-[10px] text-yellow-400 uppercase tracking-widest font-bold">Live Data Feed</p>
             </div>
           </div>
@@ -511,8 +513,8 @@ const Index = () => {
             </div>
             {!isSidebarCollapsed && (
               <div className="overflow-hidden whitespace-nowrap">
-                <h1 className="text-xl font-bold text-white tracking-tight">Smart Analytics</h1>
-                <p className="text-[9px] text-yellow-300 uppercase tracking-widest font-bold mt-0.5">Municipal OS</p>
+                <h1 className="text-xl font-bold text-white tracking-tight">SAM</h1>
+                <p className="text-[9px] text-yellow-300 uppercase tracking-widest font-bold mt-0.5">Enterprise System</p>
               </div>
             )}
           </div>

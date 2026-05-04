@@ -35,7 +35,9 @@ export const EAStrategyTab = () => {
       if (res.ok) {
         const data = await res.json();
         // Filter specifically for EA status
-        setRequests(data.filter((r: EARequest) => r.status === 'Awaiting EA Vetting'));
+        if (Array.isArray(data)) {
+          setRequests(data.filter((r: EARequest) => r.status === 'Awaiting EA Vetting'));
+        }
       }
     } catch (err) {
       console.error("Failed to fetch pending EA requests:", err);
@@ -46,13 +48,20 @@ export const EAStrategyTab = () => {
     fetchPendingVetting(); 
   }, []);
 
+  // Ensure state resets when clicking a different request in the queue
+  const handleSelectRequest = (req: EARequest) => {
+    setSelectedRequest(req);
+    setScore(50);
+    setComments("");
+  };
+
   const handleVetting = async (status: 'Approved' | 'Vetoed') => {
     if (!selectedRequest) return;
     setIsSubmitting(true);
     
     try {
       const token = localStorage.getItem('appManagerToken');
-      await fetch(`${API_URL}/api/requests/${selectedRequest.id}/vetting`, {
+      const res = await fetch(`${API_URL}/api/requests/${selectedRequest.id}/vetting`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json',
@@ -65,11 +74,16 @@ export const EAStrategyTab = () => {
         })
       });
       
-      // Clear selection and refresh queue
-      setSelectedRequest(null);
-      setScore(50);
-      setComments("");
-      fetchPendingVetting();
+      if (res.ok) {
+        // Clear selection and refresh queue
+        setSelectedRequest(null);
+        setScore(50);
+        setComments("");
+        fetchPendingVetting();
+      } else {
+        const errorData = await res.json();
+        alert(`Vetting failed: ${errorData.error}`);
+      }
     } catch (err) {
       console.error("Vetting failed:", err);
     } finally {
@@ -133,7 +147,7 @@ export const EAStrategyTab = () => {
               requests.map(req => (
                 <div 
                   key={req.id} 
-                  onClick={() => setSelectedRequest(req)}
+                  onClick={() => handleSelectRequest(req)}
                   className={`p-4 rounded-lg border cursor-pointer transition-all ${selectedRequest?.id === req.id ? 'border-blue-500 bg-blue-50 shadow-sm' : 'border-gray-200 hover:border-blue-300 bg-white shadow-sm hover:shadow'}`}
                 >
                   <div className="flex justify-between items-start">
@@ -196,14 +210,14 @@ export const EAStrategyTab = () => {
                     disabled={isSubmitting}
                     className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold shadow-sm"
                   >
-                    <CheckCircle className="w-4 h-4 mr-2" /> Approve for PMO
+                    {isSubmitting ? 'Processing...' : <><CheckCircle className="w-4 h-4 mr-2" /> Approve for PMO</>}
                   </Button>
                   <Button 
                     onClick={() => handleVetting('Vetoed')}
                     disabled={isSubmitting}
                     className="flex-1 bg-red-50 text-red-700 hover:bg-red-100 border border-red-200 font-bold shadow-sm"
                   >
-                    <XCircle className="w-4 h-4 mr-2" /> Veto Request
+                    {isSubmitting ? 'Processing...' : <><XCircle className="w-4 h-4 mr-2" /> Veto Request</>}
                   </Button>
                 </div>
               </div>

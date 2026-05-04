@@ -51,7 +51,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           <div className="w-12 h-12 bg-gray-900 rounded-xl flex items-center justify-center mb-4 shadow-md">
             <Monitor className="h-7 w-7 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">AppManager OS</h1>
+          <h1 className="text-2xl font-bold text-gray-900">SAM</h1>
           <p className="text-sm text-gray-500">Secure Enterprise Access</p>
         </div>
 

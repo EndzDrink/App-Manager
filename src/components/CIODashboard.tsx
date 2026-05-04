@@ -25,21 +25,28 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
   onSaveReport, onNavigateToRecommendations
 }) => {
   
-  // Natively calculate the Portfolio breakdown just for the CIO
-  const internalCount = systems.filter(s => s.deployment_type === 'Internal Build').length;
-  const externalCount = systems.filter(s => s.deployment_type === 'External SaaS' || !s.deployment_type).length;
-  const hybridCount = systems.filter(s => s.deployment_type === 'Hybrid Architecture').length;
+  // Robust calculation for Portfolio breakdown using .includes() to catch all naming variations in the database.
+  // If a system has no deployment type set yet (null), we safely default it to External.
+  const internalCount = systems.filter(s => s.deployment_type?.includes('Internal')).length;
+  const externalCount = systems.filter(s => !s.deployment_type || s.deployment_type.includes('External')).length;
+  const hybridCount = systems.filter(s => s.deployment_type?.includes('Hybrid')).length;
 
   return (
     <div className="animate-in fade-in duration-500 pb-12">
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+        
+        {/* Updated IT Portfolio Card */}
         <MetricCard 
           icon={<Server className="h-5 w-5" />} 
           title="IT Portfolio" 
           value={biSystemFilter === "All" ? systems.length.toString() : "1"} 
           subtitle={
             biSystemFilter === "All"
-              ? <div className="flex gap-2 text-[10px] font-bold mt-1.5 bg-gray-100 p-1 rounded"><span className="text-green-600">INT: {internalCount}</span>|<span className="text-blue-600">EXT: {externalCount}</span>|<span className="text-purple-600">HYB: {hybridCount}</span></div>
+              ? <div className="flex gap-2 text-[10px] font-bold mt-1.5 bg-gray-100 p-1 rounded">
+                  <span className="text-green-600">INT: {internalCount}</span>|
+                  <span className="text-blue-600">EXT: {externalCount}</span>|
+                  <span className="text-purple-600">HYB: {hybridCount}</span>
+                </div>
               : "Isolated View"
           } 
         />

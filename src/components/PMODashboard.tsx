@@ -32,6 +32,33 @@ export const PMODashboard = () => {
     }
   };
 
+  // ESCALATION LOGIC: Sends a targeted alert to the CIO via usage_logs
+  const handleEscalate = async () => {
+    const token = localStorage.getItem('appManagerToken');
+    try {
+      const res = await fetch(`${API_URL}/api/pmo/escalate`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ 
+          project_id: 'GLOBAL-PIPELINE', 
+          reason: 'Funding Bottleneck impacting multiple departments' 
+        })
+      });
+      
+      if (res.ok) {
+        alert("⚠️ Escalated to CIO. This bottleneck is now logged for Executive Review on the CIO Dashboard.");
+      } else {
+        const err = await res.json();
+        alert(`Escalation failed: ${err.error}`);
+      }
+    } catch (err) {
+      console.error("Escalation failed", err);
+    }
+  };
+
   useEffect(() => {
     fetchPipeline();
   }, []);
@@ -130,16 +157,17 @@ export const PMODashboard = () => {
                   <tr key={proj.id} className="hover:bg-gray-50 transition-colors group cursor-pointer">
                     <td className="py-3 pr-4">
                       <p className="text-[9px] text-gray-400 font-bold mb-0.5">{proj.id}</p>
-                      <p className="font-bold text-sm text-blue-900 group-hover:text-blue-700">{proj.name}</p>
+                      {/* INJECTED FALLBACK USING project_name */}
+                      <p className="font-bold text-sm text-blue-900 group-hover:text-blue-700">{proj.project_name || 'Unnamed Project'}</p>
                     </td>
                     <td className="py-3 pr-4">
                       <span className="text-xs font-medium text-gray-600 bg-gray-100 px-2 py-1 rounded">
-                        {proj.department}
+                        {proj.department || 'Unassigned Dept'}
                       </span>
                     </td>
                     <td className="py-3 pr-4">
                       <span className={`border px-2 py-1 rounded text-[10px] font-bold uppercase ${getStatusColor(proj.status)}`}>
-                        {proj.status}
+                        {proj.status || 'Pending'}
                       </span>
                     </td>
                     <td className="py-3 pr-4">
@@ -147,7 +175,7 @@ export const PMODashboard = () => {
                         {proj.status === 'Funded' && <CheckCircle2 className="h-3 w-3 text-green-500 mr-1.5" />}
                         {proj.status === 'Awaiting Funding' && <AlertCircle className="h-3 w-3 text-orange-500 mr-1.5" />}
                         {proj.status === 'Initiative' && <Clock className="h-3 w-3 text-blue-500 mr-1.5" />}
-                        {proj.stage}
+                        {proj.stage || 'Initial Review'}
                       </div>
                     </td>
                     <td className="py-3 text-right">
@@ -183,18 +211,21 @@ export const PMODashboard = () => {
                 awaitingFunding.map(proj => (
                   <div key={`alert-${proj.id}`} className="bg-orange-50 border border-orange-100 p-3 rounded-lg">
                     <div className="flex justify-between items-start mb-1">
-                      <p className="text-xs font-bold text-orange-900 truncate pr-2">{proj.name}</p>
+                      <p className="text-xs font-bold text-orange-900 truncate pr-2">{proj.project_name || 'Unnamed Project'}</p>
                       <p className="text-[10px] font-bold text-orange-700 bg-orange-200 px-1.5 py-0.5 rounded">ZAR {parseFloat(proj.budget || 0).toLocaleString()}</p>
                     </div>
                     <p className="text-[10px] text-orange-700 flex items-center mt-2 font-medium">
-                      <ChevronRight className="h-3 w-3 mr-0.5" /> Blocked at: {proj.department} Deputy Director
+                      <ChevronRight className="h-3 w-3 mr-0.5" /> Blocked at: {proj.department || 'Unassigned Dept'} Deputy Director
                     </p>
                   </div>
                 ))
               )}
             </div>
             
-            <Button className="w-full mt-4 bg-white border border-gray-200 text-blue-900 hover:bg-gray-50 text-xs font-bold shadow-sm disabled:opacity-50">
+            <Button 
+              onClick={handleEscalate}
+              className="w-full mt-4 bg-red-600 text-white hover:bg-red-700 text-xs font-bold shadow-sm disabled:opacity-50"
+            >
               Escalate to CIO
             </Button>
           </Card>
