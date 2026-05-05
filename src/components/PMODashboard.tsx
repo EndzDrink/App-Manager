@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { MetricCard } from "@/components/MetricCard";
 import { 
   FileText, CheckCircle2, Clock, AlertCircle, 
-  DollarSign, Briefcase, Activity, GitBranch, RefreshCw, ChevronRight
+  DollarSign, Briefcase, Activity, GitBranch, RefreshCw, ChevronRight, Loader2
 } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -12,6 +12,7 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 export const PMODashboard = () => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [pipelineData, setPipelineData] = useState<any[]>([]);
+  const [escalatingId, setEscalatingId] = useState<string | null>(null);
 
   // REAL DATA PIPELINE: Fetching from PMO Projects Table
   const fetchPipeline = async () => {
@@ -32,8 +33,9 @@ export const PMODashboard = () => {
     }
   };
 
-  // ESCALATION LOGIC: Sends a targeted alert to the CIO via usage_logs
-  const handleEscalate = async () => {
+  // TARGETED ESCALATION LOGIC: Sends a specific project alert to the CIO via usage_logs
+  const handleEscalate = async (projectId: string, projectName: string) => {
+    setEscalatingId(projectId);
     const token = localStorage.getItem('appManagerToken');
     try {
       const res = await fetch(`${API_URL}/api/pmo/escalate`, {
@@ -43,19 +45,21 @@ export const PMODashboard = () => {
           'Authorization': `Bearer ${token}` 
         },
         body: JSON.stringify({ 
-          project_id: 'GLOBAL-PIPELINE', 
-          reason: 'Funding Bottleneck impacting multiple departments' 
+          project_id: projectId, 
+          reason: `Funding Bottleneck for ${projectName}. Requires executive unblocking.` 
         })
       });
       
       if (res.ok) {
-        alert("⚠️ Escalated to CIO. This bottleneck is now logged for Executive Review on the CIO Dashboard.");
+        alert(`⚠️ Project ${projectId} escalated to CIO. It is now logged for Executive Review.`);
       } else {
         const err = await res.json();
         alert(`Escalation failed: ${err.error}`);
       }
     } catch (err) {
       console.error("Escalation failed", err);
+    } finally {
+      setEscalatingId(null);
     }
   };
 
@@ -157,7 +161,6 @@ export const PMODashboard = () => {
                   <tr key={proj.id} className="hover:bg-gray-50 transition-colors group cursor-pointer">
                     <td className="py-3 pr-4">
                       <p className="text-[9px] text-gray-400 font-bold mb-0.5">{proj.id}</p>
-                      {/* INJECTED FALLBACK USING project_name */}
                       <p className="font-bold text-sm text-blue-900 group-hover:text-blue-700">{proj.project_name || 'Unnamed Project'}</p>
                     </td>
                     <td className="py-3 pr-4">
@@ -201,7 +204,7 @@ export const PMODashboard = () => {
               Funding Bottlenecks
             </h3>
             
-            <div className="space-y-3 flex-1">
+            <div className="space-y-4 flex-1">
               {awaitingFunding.length === 0 ? (
                 <div className="text-center py-6 text-gray-400">
                   <CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-200" />
@@ -209,25 +212,29 @@ export const PMODashboard = () => {
                 </div>
               ) : (
                 awaitingFunding.map(proj => (
-                  <div key={`alert-${proj.id}`} className="bg-orange-50 border border-orange-100 p-3 rounded-lg">
-                    <div className="flex justify-between items-start mb-1">
-                      <p className="text-xs font-bold text-orange-900 truncate pr-2">{proj.project_name || 'Unnamed Project'}</p>
-                      <p className="text-[10px] font-bold text-orange-700 bg-orange-200 px-1.5 py-0.5 rounded">ZAR {parseFloat(proj.budget || 0).toLocaleString()}</p>
+                  <div key={`alert-${proj.id}`} className="bg-orange-50 border border-orange-100 p-4 rounded-lg shadow-sm">
+                    <div className="flex justify-between items-start mb-2">
+                      <p className="text-xs font-bold text-orange-900 pr-2 leading-tight">{proj.project_name || 'Unnamed Project'}</p>
+                      <p className="text-[10px] font-bold text-orange-700 bg-orange-200 px-1.5 py-0.5 rounded whitespace-nowrap">ZAR {parseFloat(proj.budget || 0).toLocaleString()}</p>
                     </div>
-                    <p className="text-[10px] text-orange-700 flex items-center mt-2 font-medium">
-                      <ChevronRight className="h-3 w-3 mr-0.5" /> Blocked at: {proj.department || 'Unassigned Dept'} Deputy Director
-                    </p>
+                    
+                    <div className="flex justify-between items-center mt-3 pt-3 border-t border-orange-200/50">
+                      <p className="text-[10px] text-orange-700 flex items-center font-bold">
+                        <ChevronRight className="h-3 w-3 mr-0.5" /> Blocked: {proj.department || 'Unassigned'}
+                      </p>
+                      <Button 
+                        onClick={() => handleEscalate(proj.id, proj.project_name || 'Unnamed Project')}
+                        disabled={escalatingId === proj.id}
+                        size="sm"
+                        className="bg-red-600 hover:bg-red-700 text-white text-[10px] font-bold h-7 px-3 shadow-sm transition-colors"
+                      >
+                        {escalatingId === proj.id ? <><Loader2 className="h-3 w-3 mr-1.5 animate-spin"/> ESCALATING</> : 'ESCALATE'}
+                      </Button>
+                    </div>
                   </div>
                 ))
               )}
             </div>
-            
-            <Button 
-              onClick={handleEscalate}
-              className="w-full mt-4 bg-red-600 text-white hover:bg-red-700 text-xs font-bold shadow-sm disabled:opacity-50"
-            >
-              Escalate to CIO
-            </Button>
           </Card>
         </div>
 

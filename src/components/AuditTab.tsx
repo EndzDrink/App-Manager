@@ -19,10 +19,14 @@ import {
   Activity,
   Network,
   Lock,
-  GitPullRequest
+  GitPullRequest,
+  Copy,
+  FileCheck
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 interface AuditTabProps {
   duplications: any[];
@@ -48,10 +52,15 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
   const [resolutionStep, setResolutionStep] = useState<ResolutionStep>('select');
   const [primarySystem, setPrimarySystem] = useState<string>('');
   const [ticketId, setTicketId] = useState<string>('');
-  const [resolvedCategories, setResolvedCategories] = useState<string[]>([]);
+  const [activeResolutions, setActiveResolutions] = useState<Record<string, string>>({});
 
-  // --- MOCK DATA: Actionable AG Compliance Matrix ---
-  const [alignmentData] = useState([
+  // TENDER GATEKEEPER SECURITY STATES
+  const [clearanceToken, setClearanceToken] = useState<string>('');
+  const [isCopied, setIsCopied] = useState(false);
+
+  // AG COMPLIANCE MATRIX STATES (Now Mutable for active remediation)
+  const [isHandingOver, setIsHandingOver] = useState(false);
+  const [alignmentData, setAlignmentData] = useState([
     { 
       id: "PRJ-2026-782", 
       name: "e-Sign Expansion (DocuSign)", 
@@ -94,12 +103,15 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
     }
   ]);
 
+  // --- TENDER GATEKEEPER LOGIC ---
   const handleRunScan = () => {
     if (!specText.trim()) return;
     setIsScanning(true);
     setScanResult(null);
     setDetectedSystem('');
     setDetectedReason('');
+    setClearanceToken('');
+    setIsCopied(false);
 
     setTimeout(() => {
       setIsScanning(false);
@@ -108,7 +120,6 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
       let matchReason = '';
       const overlap = systems.find(s => {
         const sysNameLower = s.name.toLowerCase();
-        // Support both mapped category and raw functional_category from DB
         const sysCategory = (s.category || s.functional_category || '').toLowerCase();
         
         if (lowerSpec.includes(sysNameLower)) { matchReason = 'Direct Name Match'; return true; }
@@ -133,12 +144,51 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
         setScanResult('flagged');
       } else {
         setScanResult('clean');
+        // Generate a cryptographically styled secure token for SCM
+        setClearanceToken(`EA-AUTH-${Math.random().toString(36).substr(2, 9).toUpperCase()}`);
       }
     }, 2000);
   };
 
-  const clearScan = () => { setSpecText(''); setScanResult(null); };
+  const clearScan = () => { 
+    setSpecText(''); 
+    setScanResult(null); 
+    setClearanceToken('');
+    setIsCopied(false);
+  };
 
+  const copyClearanceToken = () => {
+    navigator.clipboard.writeText(`AUTHORIZATION CLEARED.\nTOKEN: ${clearanceToken}\nVALID FOR: 30 DAYS\nISSUER: EA GOVERNANCE PLATFORM`);
+    setIsCopied(true);
+    setTimeout(() => setIsCopied(false), 3000);
+  };
+
+  // --- AG COMPLIANCE HANDOVER LOGIC ---
+  const handleInitiateHandover = async () => {
+    if (!selectedAlignment) return;
+    setIsHandingOver(true);
+
+    // Simulate API call to update the project ownership and alert the DD
+    setTimeout(() => {
+      setAlignmentData(prev => prev.map(item => {
+        if (item.id === selectedAlignment.id) {
+          return {
+            ...item,
+            status: "Remediation Active",
+            payer: item.owner, // Shift ownership to the correct DD
+            risk: "Medium", // Downgrade risk since it's actively managed now
+            next_step: "Pending formal DD sign-off in the Identity Matrix to finalize budget transfer."
+          };
+        }
+        return item;
+      }));
+      
+      setIsHandingOver(false);
+      setSelectedAlignment(null); // Close modal
+    }, 1500);
+  };
+
+  // --- DUPLICATION RESOLUTION LOGIC ---
   const openResolutionModal = (dup: any) => {
     setSelectedDuplicate(dup);
     setResolutionStep('select');
@@ -148,18 +198,46 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
 
   const closeResolutionModal = () => {
     if (resolutionStep === 'notify-success' || resolutionStep === 'consolidate-success') {
-      if (selectedDuplicate) setResolvedCategories(prev => [...prev, selectedDuplicate.category]);
+      if (selectedDuplicate) {
+        setActiveResolutions(prev => ({
+          ...prev,
+          [selectedDuplicate.category]: ticketId
+        }));
+      }
     }
     setSelectedDuplicate(null);
     setTimeout(() => setResolutionStep('select'), 300);
   };
 
-  const handleNotifyPMO = () => {
+  const handleNotifyPMO = async () => {
     setResolutionStep('notifying');
-    setTimeout(() => {
-      setTicketId(`PMO-REQ-${Math.floor(1000 + Math.random() * 9000)}`);
-      setResolutionStep('notify-success');
-    }, 1500);
+    const token = localStorage.getItem('appManagerToken');
+    const generatedTicket = `PMO-REQ-${Math.floor(1000 + Math.random() * 9000)}`;
+    const systemsInvolved = (selectedDuplicate?.systems || selectedDuplicate?.app_names || []).join(', ');
+
+    try {
+      await fetch(`${API_URL}/api/pmo/escalate`, {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ 
+          project_id: generatedTicket, 
+          reason: `EA Consolidation Required for Category: ${selectedDuplicate?.category}. Overlapping systems: ${systemsInvolved}` 
+        })
+      });
+
+      setTimeout(() => {
+        setTicketId(generatedTicket);
+        setResolutionStep('notify-success');
+      }, 800);
+    } catch (err) {
+      setTimeout(() => {
+        setTicketId(generatedTicket);
+        setResolutionStep('notify-success');
+      }, 800);
+    }
   };
 
   const handleExecuteConsolidation = () => {
@@ -169,8 +247,6 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
       setResolutionStep('consolidate-success');
     }, 2000);
   };
-
-  const displayDuplications = duplications.filter(dup => !resolvedCategories.includes(dup.category));
 
   return (
     <div className="animate-in fade-in duration-500 h-full flex flex-col max-w-[1600px] mx-auto relative pb-12">
@@ -256,7 +332,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
                       {isScanning ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Analyzing Capabilities...</> : <><Scale className="h-4 w-4 mr-2 text-yellow-400" /> Scan Strategic Overlap</>}
                     </Button>
                   ) : (
-                    <Button onClick={clearScan} variant="outline" className="mt-4 border-gray-300 text-gray-600 h-10 font-bold">New Scan</Button>
+                    <Button onClick={clearScan} variant="outline" className="mt-4 border-gray-300 text-gray-600 h-10 font-bold">Scan New Document</Button>
                   )}
                 </div>
 
@@ -278,15 +354,31 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
                           Architectural Conflict 
                           <span className="text-orange-500 bg-orange-50 px-1.5 py-0.5 rounded">{detectedReason}</span>
                         </h4>
-                        <p className="text-[11px] text-gray-700 leading-relaxed">Requirements overlap with <strong>{detectedSystem}</strong> which is already licensed for IMU. PMO must submit a deviation request.</p>
+                        <p className="text-[11px] text-gray-700 leading-relaxed">Requirements overlap with <strong>{detectedSystem}</strong> which is already licensed for IMU. Procurement via SCM may not proceed without a deviation request.</p>
                       </div>
                     </div>
                   )}
                   {scanResult === 'clean' && (
-                    <div className="animate-in slide-in-from-right-4 duration-300 text-center">
-                      <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3"><CheckCircle2 className="h-6 w-6 text-green-600" /></div>
-                      <h3 className="font-bold text-green-800 text-base">Cleared for Tender</h3>
-                      <p className="text-[10px] text-gray-500 font-mono mt-1 font-bold tracking-widest">TOKEN: EA-AUTH-{Math.random().toString(36).substr(2, 5).toUpperCase()}</p>
+                    <div className="animate-in slide-in-from-right-4 duration-300 text-center flex flex-col items-center justify-center h-full">
+                      <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+                        <CheckCircle2 className="h-6 w-6 text-green-600" />
+                      </div>
+                      <h3 className="font-bold text-green-800 text-base mb-1">Cleared for Tender</h3>
+                      <p className="text-[10px] text-gray-600 font-medium mb-4">No architectural duplication detected.</p>
+                      
+                      <div className="bg-white border border-green-200 w-full p-3 rounded-lg shadow-sm mb-4">
+                        <p className="text-[9px] font-bold text-gray-400 uppercase tracking-widest mb-1 text-left">EA Clearance Token</p>
+                        <p className="text-sm text-gray-800 font-mono font-bold text-left tracking-wider">{clearanceToken}</p>
+                      </div>
+
+                      <Button 
+                        onClick={copyClearanceToken}
+                        variant={isCopied ? "default" : "outline"}
+                        className={`w-full font-bold h-10 ${isCopied ? 'bg-green-600 hover:bg-green-700 text-white border-none' : 'border-blue-200 text-blue-800 hover:bg-blue-50'}`}
+                      >
+                        {isCopied ? <><FileCheck className="h-4 w-4 mr-2" /> Copied to Clipboard</> : <><Copy className="h-4 w-4 mr-2" /> Export EA Clearance</>}
+                      </Button>
+                      <p className="text-[9px] text-gray-400 mt-2">Required attachment for SCM procurement</p>
                     </div>
                   )}
                 </div>
@@ -296,29 +388,43 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
             {/* OVERLAPS & DEPT FLAGS */}
             <Card className="xl:col-span-1 border border-gray-200 shadow-sm rounded-xl bg-white flex flex-col h-full overflow-hidden">
               <div className="flex border-b border-gray-200 bg-gray-50 shrink-0">
-                <button onClick={() => setActiveSideTab('duplications')} className={`flex-1 py-3 text-xs font-bold uppercase transition-colors ${activeSideTab === 'duplications' ? 'bg-white text-blue-900 border-b-2 border-yellow-400' : 'text-gray-500 hover:bg-gray-100'}`}>Overlaps {displayDuplications.length > 0 && <span className="ml-1 bg-red-100 text-red-600 px-1 rounded-full text-[9px]">{displayDuplications.length}</span>}</button>
+                <button onClick={() => setActiveSideTab('duplications')} className={`flex-1 py-3 text-xs font-bold uppercase transition-colors ${activeSideTab === 'duplications' ? 'bg-white text-blue-900 border-b-2 border-yellow-400' : 'text-gray-500 hover:bg-gray-100'}`}>Overlaps {duplications.length > 0 && <span className="ml-1 bg-red-100 text-red-600 px-1 rounded-full text-[9px]">{duplications.length}</span>}</button>
                 <button onClick={() => setActiveSideTab('departments')} className={`flex-1 py-3 text-xs font-bold uppercase transition-colors ${activeSideTab === 'departments' ? 'bg-white text-blue-900 border-b-2 border-yellow-400' : 'text-gray-500 hover:bg-gray-100'}`}>Dept Flags</button>
               </div>
 
               <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
                 {activeSideTab === 'duplications' && (
                   <div className="space-y-3">
-                    {displayDuplications.length > 0 ? displayDuplications.map((dup, idx) => (
-                      <div key={idx} onClick={() => openResolutionModal(dup)} className="bg-white border border-gray-200 p-3 rounded-lg flex justify-between items-center cursor-pointer hover:border-blue-400 transition-all group overflow-hidden">
-                        <div className="flex-1 min-w-0 pr-3">
-                          <p className="text-xs font-bold text-gray-900 truncate">{dup.category || 'Conflict'}</p>
-                          <p className="text-[10px] text-gray-500 truncate">{(dup.systems || dup.app_names || []).join(' vs ')}</p>
+                    {duplications.length > 0 ? duplications.map((dup, idx) => {
+                      const pendingTicket = activeResolutions[dup.category];
+                      return (
+                        <div 
+                          key={idx} 
+                          onClick={() => !pendingTicket && openResolutionModal(dup)} 
+                          className={`bg-white border p-3 rounded-lg flex justify-between items-center transition-all group overflow-hidden ${pendingTicket ? 'border-orange-200 opacity-80 cursor-default' : 'border-gray-200 hover:border-blue-400 cursor-pointer'}`}
+                        >
+                          <div className="flex-1 min-w-0 pr-3">
+                            <p className="text-xs font-bold text-gray-900 truncate">{dup.category || 'Conflict'}</p>
+                            <p className="text-[10px] text-gray-500 truncate">{(dup.systems || dup.app_names || []).join(' vs ')}</p>
+                          </div>
+                          {pendingTicket ? (
+                            <span className="shrink-0 text-[9px] font-bold bg-orange-100 text-orange-800 px-2 py-1 rounded border border-orange-200 flex items-center">
+                              <Loader2 className="h-3 w-3 mr-1 animate-spin" /> {pendingTicket}
+                            </span>
+                          ) : (
+                            <span className="shrink-0 text-[9px] font-bold bg-orange-50 text-orange-700 px-2 py-1 rounded border border-orange-200 group-hover:bg-blue-800 group-hover:text-yellow-400 transition-colors">
+                              Resolve
+                            </span>
+                          )}
                         </div>
-                        <span className="shrink-0 text-[9px] font-bold bg-orange-50 text-orange-700 px-2 py-1 rounded border border-orange-200 group-hover:bg-blue-800 group-hover:text-yellow-400 transition-colors">Resolve</span>
-                      </div>
-                    )) : <div className="text-center py-10 text-gray-400 font-bold text-xs"><CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-200" /> Compliant</div>}
+                      );
+                    }) : <div className="text-center py-10 text-gray-400 font-bold text-xs"><CheckCircle2 className="h-8 w-8 mx-auto mb-2 text-green-200" /> Compliant</div>}
                   </div>
                 )}
 
                 {activeSideTab === 'departments' && (
                   <div className="space-y-3">
                     {deptSpend.map((dept, idx) => {
-                      // Dynamically calculate Shadow IT Risk based on spend
                       const spend = parseFloat(dept.total_spend || 0);
                       const isHighRisk = spend > 15000;
                       const isMedRisk = spend > 5000 && spend <= 15000;
@@ -340,9 +446,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
                         </div>
                       );
                     })}
-                    {deptSpend.length === 0 && (
-                      <div className="text-center py-10 text-gray-400 font-bold text-xs">No department data available.</div>
-                    )}
+                    {deptSpend.length === 0 && <div className="text-center py-10 text-gray-400 font-bold text-xs">No department data available.</div>}
                   </div>
                 )}
               </div>
@@ -379,40 +483,45 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-100">
-                  {alignmentData.map((row, idx) => (
-                    <tr 
-                      key={idx} 
-                      onClick={() => setSelectedAlignment(row)}
-                      className={`cursor-pointer hover:bg-blue-50/80 transition-all ${row.status === 'Orphan' ? 'bg-red-50/20' : 'bg-white'}`}
-                    >
-                      <td className="px-6 py-4 font-black text-gray-700">{row.id}</td>
-                      <td className="px-6 py-4 font-black text-blue-900 underline decoration-blue-200">{row.name}</td>
-                      <td className="px-6 py-4 font-bold text-gray-600">
-                        {row.ea_strategy.includes('Missing') ? (
-                          <span className="text-red-600 font-bold text-[10px] flex items-center"><XCircle className="h-3 w-3 mr-1" /> UNMAPPED</span>
-                        ) : row.ea_strategy}
-                      </td>
-                      <td className="px-6 py-4">
-                        {row.payer === 'UNASSIGNED' ? (
-                          <span className="text-orange-600 font-black text-[10px] bg-orange-50 px-2 py-1 rounded border border-orange-200 flex w-fit items-center">
-                            <AlertTriangle className="h-3 w-3 mr-1" /> NEEDS BUDGET OWNER
+                  {alignmentData.map((row, idx) => {
+                    const isOrphan = row.status === 'Orphan';
+                    const isRemediating = row.status === 'Remediation Active';
+
+                    return (
+                      <tr 
+                        key={idx} 
+                        onClick={() => setSelectedAlignment(row)}
+                        className={`cursor-pointer hover:bg-blue-50/80 transition-all ${isOrphan ? 'bg-red-50/20' : isRemediating ? 'bg-orange-50/30' : 'bg-white'}`}
+                      >
+                        <td className="px-6 py-4 font-black text-gray-700">{row.id}</td>
+                        <td className="px-6 py-4 font-black text-blue-900 underline decoration-blue-200">{row.name}</td>
+                        <td className="px-6 py-4 font-bold text-gray-600">
+                          {row.ea_strategy.includes('Missing') ? (
+                            <span className="text-red-600 font-bold text-[10px] flex items-center"><XCircle className="h-3 w-3 mr-1" /> UNMAPPED</span>
+                          ) : row.ea_strategy}
+                        </td>
+                        <td className="px-6 py-4">
+                          {row.payer === 'UNASSIGNED' ? (
+                            <span className="text-orange-600 font-black text-[10px] bg-orange-50 px-2 py-1 rounded border border-orange-200 flex w-fit items-center">
+                              <AlertTriangle className="h-3 w-3 mr-1" /> NEEDS BUDGET OWNER
+                            </span>
+                          ) : (
+                            <span className="text-gray-900 font-bold text-xs flex items-center">
+                              <Building2 className="h-3 w-3 mr-1.5 text-blue-800" /> {row.payer}
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-6 py-4 text-center">
+                          <span className={`text-[10px] font-black px-2.5 py-1 rounded-md ${isOrphan ? 'bg-red-100 text-red-700' : isRemediating ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
+                            {row.risk.toUpperCase()}
                           </span>
-                        ) : (
-                          <span className="text-gray-900 font-bold text-xs flex items-center">
-                            <Building2 className="h-3 w-3 mr-1.5 text-blue-800" /> {row.payer}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-6 py-4 text-center">
-                        <span className={`text-[10px] font-black px-2.5 py-1 rounded-md ${row.status === 'Orphan' ? 'bg-red-100 text-red-700' : 'bg-green-100 text-green-700'}`}>
-                          {row.risk.toUpperCase()}
-                        </span>
-                      </td>
-                      <td className="px-6 py-4 text-right">
-                        <Button size="sm" className="bg-blue-900 text-yellow-400 font-bold h-7 text-[9px]">VIEW ACTIONS</Button>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-6 py-4 text-right">
+                          <Button size="sm" className="bg-blue-900 text-yellow-400 font-bold h-7 text-[9px]">VIEW ACTIONS</Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -437,18 +546,25 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
 
             <div className="p-8 flex-1 space-y-8 overflow-y-auto custom-scrollbar">
               <section>
-                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest">System Identified</label>
+                <label className="text-[10px] font-black text-gray-400 uppercase tracking-widest flex justify-between">
+                  System Identified
+                  <span className={`px-2 py-0.5 rounded ${selectedAlignment.status === 'Orphan' ? 'bg-red-100 text-red-700' : selectedAlignment.status === 'Remediation Active' ? 'bg-orange-100 text-orange-700' : 'bg-green-100 text-green-700'}`}>
+                    {selectedAlignment.status}
+                  </span>
+                </label>
                 <h2 className="text-2xl font-black text-blue-900 mt-1">{selectedAlignment.name}</h2>
               </section>
 
-              <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg">
-                <div className="flex items-center text-red-800 font-bold text-xs mb-2">
-                  <AlertTriangle className="h-4 w-4 mr-2" /> Auditor General Risk
+              {selectedAlignment.status === 'Orphan' && (
+                <div className="bg-red-50 border-l-4 border-red-500 p-4 rounded-r-lg">
+                  <div className="flex items-center text-red-800 font-bold text-xs mb-2">
+                    <AlertTriangle className="h-4 w-4 mr-2" /> Auditor General Risk
+                  </div>
+                  <p className="text-xs text-red-700 leading-relaxed">
+                    This system is listed on the implementation roadmap but lacks a corresponding sustainment budget or owner.
+                  </p>
                 </div>
-                <p className="text-xs text-red-700 leading-relaxed">
-                  This system is marked as <strong>{selectedAlignment.status}</strong>. It is listed on the implementation roadmap but lacks a corresponding sustainment budget or owner.
-                </p>
-              </div>
+              )}
 
               <section className="space-y-4">
                 <h4 className="text-sm font-black text-gray-900 flex items-center">
@@ -467,9 +583,22 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
             </div>
 
             <div className="p-6 border-t border-gray-100 bg-gray-50 flex gap-3 shrink-0">
-              <Button className="flex-1 bg-blue-900 text-yellow-400 font-black h-12 shadow-lg hover:bg-blue-800">
-                INITIATE HANDOVER
-              </Button>
+              {selectedAlignment.status === 'Orphan' ? (
+                <Button 
+                  onClick={handleInitiateHandover} 
+                  disabled={isHandingOver}
+                  className="flex-1 bg-blue-900 text-yellow-400 font-black h-12 shadow-lg hover:bg-blue-800"
+                >
+                  {isHandingOver ? <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> EXECUTING...</> : 'INITIATE HANDOVER'}
+                </Button>
+              ) : (
+                <Button 
+                  disabled
+                  className="flex-1 bg-gray-200 text-gray-500 font-black h-12 shadow-none cursor-not-allowed"
+                >
+                  <CheckCircle2 className="h-4 w-4 mr-2" /> HANDOVER INITIATED
+                </Button>
+              )}
               <Button variant="outline" className="flex-1 border-gray-300 text-gray-600 font-bold h-12" onClick={() => setSelectedAlignment(null)}>
                 DISMISS
               </Button>

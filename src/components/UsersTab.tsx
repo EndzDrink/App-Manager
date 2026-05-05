@@ -1,385 +1,209 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
-  Users, RefreshCw, UserCheck, Search, Filter, 
-  Briefcase, Network, ShieldCheck, AlertTriangle, 
-  TrendingUp, Building2, Server, PieChart
+  Users as UsersIcon, Search, Shield, Building2, Calendar, 
+  Database, AlertCircle, ChevronDown, RefreshCw
 } from "lucide-react";
 
 interface UsersTabProps {
   users: any[];
-  onRefresh: () => void;
+  onRefresh: () => Promise<void> | void;
+  // This captures the system name passed from the Recommendations tab
+  investigationQuery?: string; 
 }
 
-export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh }) => {
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  
-  // --- STRICT TOP-DOWN CASCADING FILTERS ---
-  const [systemFilter, setSystemFilter] = useState<string>("All");
-  const [unitFilter, setUnitFilter] = useState<string>("All"); 
-  const [deptFilter, setDeptFilter] = useState<string>("All"); 
+export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigationQuery = '' }) => {
+  const [searchQuery, setSearchQuery] = useState(investigationQuery);
+  const [expandedUser, setExpandedUser] = useState<number | null>(null);
 
-  const handleDirectorySync = async () => {
-    setIsSyncing(true);
-    try {
-      const token = localStorage.getItem('appManagerToken');
-      await fetch('http://localhost:3000/api/users/sync', { 
-        method: 'POST',
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      onRefresh(); 
-    } catch (err) {
-      console.error("Sync failed", err);
-    } finally {
-      setIsSyncing(false);
-    }
-  };
+  useEffect(() => {
+    // If the prop changes (e.g., user clicked "Review Logs" on a different recommendation), update the search bar
+    setSearchQuery(investigationQuery);
+  }, [investigationQuery]);
 
-  // --- STRICT HIERARCHY ENGINE ---
-  const municipalUnits = ["Information Management Unit (IMU)", "Water & Sanitation Unit", "Metro Police Unit", "Parks & Recreation Unit"];
-  
-  const imuDepartments = [
-    "Enterprise Architecture", 
-    "Applications/Dev", 
-    "Networks", 
-    "PMO", 
-    "Security", 
-    "GIS", 
-    "Admin", 
-    "Customer Service"
-  ];
-  
-  const getUnitForDept = (deptName: string) => {
-    if (!deptName || deptName === 'Unassigned') return "Other";
-    if (imuDepartments.includes(deptName)) return "Information Management Unit (IMU)";
-    const lower = deptName.toLowerCase();
-    if (lower.includes("water") || lower.includes("sanitation")) return "Water & Sanitation Unit";
-    if (lower.includes("police")) return "Metro Police Unit";
-    if (lower.includes("park") || lower.includes("recreation")) return "Parks & Recreation Unit";
-    return "Other";
-  };
-
-  // 1. Master Lists
-  const allSystems = Array.from(new Set(users.flatMap(u => u.assigned_systems?.map((s:any) => s.name) || []))).sort();
-  const allDepts = Array.from(new Set(users.map(u => u.department).filter(d => d && d !== 'Unassigned'))).sort();
-
-  // 2. Available Units
-  const availableUnits = municipalUnits.filter(unit => {
-    if (systemFilter === "All") return true;
-    return users.some(u => 
-      getUnitForDept(u.department) === unit && 
-      u.assigned_systems?.some((s:any) => s.name === systemFilter)
-    );
-  });
-
-  // 3. Available Departments
-  const availableDepts = allDepts.filter(dept => {
-    if (unitFilter !== "All" && getUnitForDept(dept as string) !== unitFilter) return false;
-    if (systemFilter !== "All") {
-      const usersInThisDept = users.filter(u => u.department === dept);
-      const deptUsesSystem = usersInThisDept.some(u => u.assigned_systems?.some((s:any) => s.name === systemFilter));
-      if (!deptUsesSystem) return false;
-    }
-    return true;
-  });
-
-  // --- CASCADING RESET HANDLERS ---
-  const handleSystemChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setSystemFilter(e.target.value);
-    setUnitFilter("All"); 
-    setDeptFilter("All"); 
-  };
-
-  const handleUnitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    setUnitFilter(e.target.value);
-    setDeptFilter("All"); 
-  };
-
-  // --- FINAL DATA FILTER FOR THE TABLE ---
+  // Filter logic: Searches by email, department, or assigned systems
   const filteredUsers = users.filter(user => {
-    if (searchTerm && !user.email.toLowerCase().includes(searchTerm.toLowerCase())) return false;
-    if (systemFilter !== "All" && !user.assigned_systems?.some((s:any) => s.name === systemFilter)) return false;
-    if (unitFilter !== "All" && getUnitForDept(user.department) !== unitFilter) return false;
-    if (deptFilter !== "All" && user.department !== deptFilter) return false;
-    return true;
-  });
-
-  // --- ADOPTION ANALYTICS ENGINE ---
-  let adoptionMetrics = null;
-  if (systemFilter !== "All") {
-    let totalProvisioned = 0;
-    let activeCount = 0;
-    const deptCounts: Record<string, number> = {};
-
-    filteredUsers.forEach(user => {
-      const sysData = user.assigned_systems?.find((s:any) => s.name === systemFilter);
-      if (sysData) {
-        totalProvisioned++;
-        const mockDaysAgo = (user.id + sysData.id * 7) % 45; 
-        const isActive = mockDaysAgo <= 30;
-        
-        if (isActive) {
-          activeCount++;
-          deptCounts[user.department] = (deptCounts[user.department] || 0) + 1;
-        }
-      }
-    });
-
-    const idleCount = totalProvisioned - activeCount;
-    const adoptionRate = totalProvisioned > 0 ? Math.round((activeCount / totalProvisioned) * 100) : 0;
+    if (!searchQuery) return true;
+    const query = searchQuery.toLowerCase();
     
-    let topDept = "None";
-    let maxUsers = 0;
-    Object.entries(deptCounts).forEach(([dept, count]) => {
-      if (count > maxUsers) {
-        maxUsers = count;
-        topDept = dept;
-      }
-    });
-
-    adoptionMetrics = { totalProvisioned, activeCount, idleCount, adoptionRate, topDept, maxUsers };
-  }
+    const matchesEmail = user.email?.toLowerCase().includes(query);
+    const matchesDept = (user.department || '').toLowerCase().includes(query);
+    const matchesSystem = user.assigned_systems?.some((sys: any) => sys.name.toLowerCase().includes(query));
+    
+    return matchesEmail || matchesDept || matchesSystem;
+  });
 
   return (
-    <div className="space-y-6 animate-in fade-in duration-500 flex flex-col h-full min-h-[600px] max-w-7xl mx-auto">
+    <div className="animate-in fade-in duration-500 max-w-7xl pb-12">
       
-      {/* HEADER */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-2 border-b border-gray-200 shrink-0">
+      {/* HEADER SECTION */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4 border-b border-gray-200 pb-6">
         <div>
-          <h2 className="text-lg font-bold text-blue-900 flex items-center tracking-tight">
-            <Users className="h-5 w-5 mr-2 text-blue-800" />
-            Identity & Adoption Matrix
+          <h2 className="text-xl font-black text-blue-900 flex items-center tracking-tight">
+            <UsersIcon className="h-6 w-6 mr-2 text-blue-800" />
+            Identity & Access Matrix
           </h2>
-          <p className="text-sm text-gray-500 mt-1 font-medium">Manage access and track software adoption across the municipality.</p>
-        </div>
-        <Button 
-          onClick={handleDirectorySync} 
-          disabled={isSyncing}
-          className="bg-blue-900 hover:bg-blue-800 text-yellow-400 font-bold shadow-sm shrink-0 transition-colors"
-        >
-          <RefreshCw className={`h-4 w-4 mr-2 ${isSyncing ? 'animate-spin text-sky-400' : 'text-yellow-400'}`} />
-          Sync Entra ID
-        </Button>
-      </div>
-
-      {/* PACKAGED COMMAND TOOLBAR */}
-      <div className="bg-white border border-gray-200 rounded-xl shadow-sm p-3 flex flex-col xl:flex-row gap-4 items-center justify-between transition-colors hover:border-sky-200 shrink-0">
-        
-        <div className="relative w-full xl:max-w-sm">
-          <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-            <Search className="h-4 w-4 text-sky-500" />
-          </div>
-          <input
-            type="text"
-            placeholder="Search staff email..."
-            className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm bg-gray-50 focus:bg-white focus:outline-none focus:ring-2 focus:ring-sky-500 transition-all font-medium text-blue-900 placeholder-gray-400"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
+          <p className="text-xs text-gray-500 mt-1 font-medium">Enterprise mapping of personnel to software entitlements.</p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 w-full xl:w-auto justify-start xl:justify-end">
-          
-          <div className="flex items-center shrink-0 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 hover:border-sky-300 transition-colors flex-1 md:flex-none">
-            <Server className="h-4 w-4 mr-2 text-blue-800 shrink-0" />
-            <select
-              className="bg-transparent text-xs font-bold text-blue-900 outline-none cursor-pointer w-full truncate max-w-[150px]"
-              value={systemFilter}
-              onChange={handleSystemChange}
-            >
-              <option value="All">All Systems</option>
-              {allSystems.map((name, i) => <option key={`${name}-${i}`} value={name as string}>{name as string}</option>)}
-            </select>
-          </div>
-
-          <div className="flex items-center shrink-0 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 hover:border-sky-300 transition-colors flex-1 md:flex-none">
-            <Network className="h-4 w-4 mr-2 text-blue-800 shrink-0" />
-            <select
-              className="bg-transparent text-xs font-bold text-blue-900 outline-none cursor-pointer w-full truncate max-w-[150px]"
-              value={unitFilter}
-              onChange={handleUnitChange}
-            >
-              <option value="All">All Units</option>
-              {availableUnits.map((unit, i) => <option key={`${unit}-${i}`} value={unit}>{unit}</option>)}
-            </select>
-          </div>
-
-          <div className="flex items-center shrink-0 bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 hover:border-sky-300 transition-colors flex-1 md:flex-none">
-            <Briefcase className="h-4 w-4 mr-2 text-blue-800 shrink-0" />
-            <select
-              className="bg-transparent text-xs font-bold text-blue-900 outline-none cursor-pointer w-full truncate max-w-[150px]"
-              value={deptFilter}
-              onChange={(e) => setDeptFilter(e.target.value)}
-            >
-              <option value="All">All Departments</option>
-              {availableDepts.map((name, i) => <option key={`${name}-${i}`} value={name as string}>{name as string}</option>)}
-            </select>
-          </div>
-
-        </div>
-      </div>
-
-      {/* DYNAMIC ADOPTION ANALYTICS PANELS */}
-      {adoptionMetrics && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 shrink-0 animate-in slide-in-from-top-4 duration-300">
-          
-          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex items-center">
-            <div className="bg-blue-50 p-3 rounded-lg mr-4">
-              <PieChart className="h-6 w-6 text-blue-800" />
+        <div className="flex items-center gap-3 w-full md:w-auto">
+          {/* SEARCH BAR */}
+          <div className="relative w-full md:w-96">
+            <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+              <Search className="h-4 w-4 text-sky-500" />
             </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mb-1">Overall Adoption</p>
-              <div className="flex items-baseline">
-                <h3 className="text-xl font-black text-gray-900">{adoptionMetrics.adoptionRate}%</h3>
-                <span className="text-xs font-bold text-gray-500 ml-2">Active</span>
+            <input
+              type="text"
+              placeholder="Search by email, department, or system name..."
+              className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm bg-white focus:ring-2 focus:ring-sky-500 transition-all font-medium text-blue-900 shadow-sm"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+            {searchQuery && (
+              <div className="absolute inset-y-0 right-0 pr-3 flex items-center">
+                <span className="text-[9px] font-bold uppercase bg-yellow-100 text-yellow-700 px-1.5 py-0.5 rounded border border-yellow-200">
+                  Filtered
+                </span>
               </div>
-            </div>
+            )}
           </div>
 
-          <div className="bg-white border border-gray-200 rounded-xl p-4 shadow-sm flex items-center">
-            <div className="bg-sky-50 p-3 rounded-lg mr-4">
-              <Building2 className="h-6 w-6 text-sky-600" />
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mb-1">Primary Consumer</p>
-              <h3 className="text-sm font-bold text-blue-900 truncate max-w-[150px]">{adoptionMetrics.topDept}</h3>
-              <p className="text-xs font-bold text-gray-500">{adoptionMetrics.maxUsers} Active Seats</p>
-            </div>
-          </div>
+          <Button 
+            onClick={onRefresh} 
+            variant="outline" 
+            className="bg-white text-blue-900 border-gray-200 hover:bg-gray-50 font-bold shadow-sm px-3"
+            title="Refresh Directory"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+        </div>
+      </div>
 
-          <div className={`bg-white border rounded-xl p-4 shadow-sm flex items-center ${adoptionMetrics.idleCount > 0 ? 'border-orange-200' : 'border-gray-200'}`}>
-            <div className={`${adoptionMetrics.idleCount > 0 ? 'bg-orange-50' : 'bg-green-50'} p-3 rounded-lg mr-4`}>
-              <AlertTriangle className={`h-6 w-6 ${adoptionMetrics.idleCount > 0 ? 'text-orange-500' : 'text-green-500'}`} />
-            </div>
-            <div>
-              <p className="text-[10px] uppercase tracking-widest font-bold text-gray-500 mb-1">Optimization Opportunity</p>
-              <h3 className={`text-xl font-black ${adoptionMetrics.idleCount > 0 ? 'text-orange-600' : 'text-green-600'}`}>
-                {adoptionMetrics.idleCount} <span className="text-sm font-bold">Idle Licenses</span>
-              </h3>
-              {adoptionMetrics.idleCount > 0 && (
-                <p className="text-[10px] font-bold text-orange-600/80">Available for reallocation</p>
-              )}
-            </div>
-          </div>
-
+      {investigationQuery && (
+        <div className="mb-6 bg-blue-50 border border-blue-200 rounded-lg p-3 flex items-center text-sm shadow-sm animate-in slide-in-from-top-2">
+          <AlertCircle className="h-4 w-4 text-blue-600 mr-2 shrink-0" />
+          <p className="text-blue-900 font-medium">
+            <strong>Investigation Mode:</strong> You are currently viewing all users assigned to <span className="font-bold underline decoration-blue-300">{investigationQuery}</span> based on AI recommendations.
+          </p>
+          <Button 
+            variant="ghost" 
+            size="sm" 
+            className="ml-auto text-blue-700 hover:bg-blue-100 h-7 text-xs font-bold"
+            onClick={() => setSearchQuery('')}
+          >
+            Clear Filter
+          </Button>
         </div>
       )}
 
-      {/* DENSE ENTERPRISE DATA TABLE */}
-      <div className="flex-1 bg-white border border-gray-200 rounded-xl shadow-sm overflow-hidden flex flex-col relative">
-        
-        <div className="bg-blue-900 px-6 py-3 border-b border-blue-950 flex justify-between items-center shrink-0">
-          <span className="text-xs font-bold text-white">Displaying {filteredUsers.length} authorized personnel</span>
-          {systemFilter !== 'All' && (
-            <span className="text-[10px] font-bold text-blue-900 bg-yellow-400 px-2.5 py-1 rounded shadow-sm uppercase tracking-wider">
-              Filtered View: {systemFilter}
-            </span>
-          )}
-        </div>
-
-        <div className="overflow-x-auto flex-1 custom-scrollbar bg-gray-50">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-white text-blue-900 text-[10px] uppercase tracking-widest font-bold border-b border-gray-200 sticky top-0 z-10 shadow-sm">
-              <tr>
-                <th className="px-6 py-4">Employee Identity</th>
-                <th className="px-6 py-4">Organizational Path</th>
-                <th className="px-6 py-4">Status</th>
-                <th className="px-6 py-4">Assigned Enterprise Systems (Status)</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100 overflow-y-auto">
-              
-              {filteredUsers.length === 0 ? (
-                <tr>
-                  <td colSpan={4} className="px-6 py-24 text-center bg-white">
-                    <Search className="h-10 w-10 text-sky-200 mx-auto mb-3" />
-                    <p className="text-sm font-bold text-blue-900">No personnel records found.</p>
-                    <p className="text-xs text-gray-500 mt-1">Try adjusting your active filters.</p>
-                  </td>
+      {/* MATRIX TABLE */}
+      <Card className="bg-white border border-gray-200 shadow-sm overflow-hidden">
+        {filteredUsers.length === 0 ? (
+          <div className="p-12 text-center text-gray-400 flex flex-col items-center">
+            <Shield className="h-10 w-10 mb-3 text-gray-200" />
+            <p className="text-sm font-bold text-gray-500">No identities match your parameters.</p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-gray-50 border-b border-gray-200">
+                <tr className="text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                  <th className="p-4">Identity / Email</th>
+                  <th className="p-4">Department Unit</th>
+                  <th className="p-4">Onboarding Date</th>
+                  <th className="p-4">Active Entitlements</th>
+                  <th className="p-4 text-right">Actions</th>
                 </tr>
-              ) : (
-                filteredUsers.map((user) => {
-                  const unit = getUnitForDept(user.department);
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {filteredUsers.map((user) => {
+                  const isExpanded = expandedUser === user.id;
+                  const assignedSystems = user.assigned_systems || [];
+                  const totalCost = assignedSystems.reduce((sum: number, sys: any) => sum + parseFloat(sys.price || 0), 0);
+
                   return (
-                    <tr key={user.id} className="hover:bg-sky-50/50 bg-white transition-colors group">
-                      
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center space-x-3">
-                          <div className="h-8 w-8 bg-gray-100 group-hover:bg-blue-100 rounded-full flex items-center justify-center transition-colors shadow-inner">
-                            <UserCheck className="h-4 w-4 text-gray-500 group-hover:text-blue-800" />
-                          </div>
-                          <div>
-                            <p className="font-bold text-gray-900 group-hover:text-blue-900 transition-colors">{user.email}</p>
-                            <p className="text-[10px] text-gray-400 uppercase tracking-wider mt-0.5 font-bold">ID: ETH-{user.id.toString().padStart(5, '0')}</p>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex flex-col">
+                    <React.Fragment key={user.id}>
+                      <tr className={`hover:bg-sky-50/50 transition-colors ${isExpanded ? 'bg-sky-50/50' : 'bg-white'}`}>
+                        <td className="p-4">
+                          <p className="font-bold text-sm text-blue-900">{user.email}</p>
+                          <p className="text-[10px] text-gray-400 font-medium uppercase tracking-wider mt-0.5">UID-{user.id}</p>
+                        </td>
+                        <td className="p-4">
                           <span className="text-xs font-bold text-gray-700 flex items-center">
-                            <Network className="h-3 w-3 mr-1.5 text-sky-500" /> {unit}
+                            <Building2 className="h-3.5 w-3.5 mr-1.5 text-gray-400" />
+                            {user.department || 'Unassigned'}
                           </span>
-                          <span className="text-[10px] font-bold text-blue-800 flex items-center mt-1.5 bg-blue-50 w-fit px-2 py-0.5 rounded shadow-sm border border-blue-100">
-                            <Building2 className="h-2.5 w-2.5 mr-1 text-blue-600" /> {user.department}
+                        </td>
+                        <td className="p-4">
+                          <span className="text-xs font-medium text-gray-600 flex items-center">
+                            <Calendar className="h-3.5 w-3.5 mr-1.5 text-gray-400" />
+                            {user.onboarding_date || 'Legacy'}
                           </span>
-                        </div>
-                      </td>
-
-                      <td className="px-6 py-4 whitespace-nowrap">
-                         <div className="flex flex-col space-y-1.5">
-                           <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-bold bg-green-50 text-green-700 border border-green-200 w-fit shadow-sm">
-                             <ShieldCheck className="w-3 h-3 mr-1" /> Active
-                           </span>
-                           <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider">Since: {user.onboarding_date || 'N/A'}</span>
-                         </div>
-                      </td>
-
-                      <td className="px-6 py-4">
-                        <div className="flex flex-wrap gap-2 max-w-md">
-                          {user.assigned_systems?.length > 0 ? (
-                            user.assigned_systems.map((sys: any, idx: number) => {
-                              
-                              const mockDaysAgo = (user.id + sys.id * 7) % 45; 
-                              const isAbandoned = mockDaysAgo > 30; 
-                              
-                              const dotColor = isAbandoned ? 'bg-red-500' : 'bg-green-500';
-                              const borderColor = isAbandoned ? 'border-red-200 bg-red-50' : 'border-gray-200 bg-white';
-                              const textColor = isAbandoned ? 'text-red-800 font-bold' : 'text-gray-700 font-semibold';
-                              
-                              const hoverText = isAbandoned 
-                                ? `⚠️ INACTIVE: Last logged in ${mockDaysAgo} days ago` 
-                                : `✅ ACTIVE: Last logged in ${mockDaysAgo === 0 ? 'Today' : mockDaysAgo + ' days ago'}`;
-
-                              // FIXED: Using a unique key combining user ID, system name, and index
-                              return (
-                                <span 
-                                  key={`${user.id}-${sys.name || sys.id}-${idx}`} 
-                                  title={hoverText}
-                                  className={`${borderColor} ${textColor} px-2 py-1 rounded-md text-[10px] shadow-sm flex items-center cursor-help transition-all hover:shadow-md hover:border-sky-300`}
-                                >
-                                  <span className={`h-2 w-2 rounded-full mr-1.5 ${dotColor} shadow-sm border border-white ${isAbandoned ? 'animate-pulse' : ''}`}></span>
-                                  {sys.name}
-                                </span>
-                              );
-                            })
-                          ) : (
-                            <span className="text-[10px] text-gray-400 font-bold italic px-2 py-1 border border-dashed border-gray-300 rounded bg-gray-50">
-                              No provisioned licenses
+                        </td>
+                        <td className="p-4">
+                          <div className="flex items-center space-x-2">
+                            <span className="text-[10px] font-black bg-blue-100 text-blue-800 px-2 py-0.5 rounded border border-blue-200">
+                              {assignedSystems.length} Apps
                             </span>
-                          )}
-                        </div>
-                      </td>
+                            <span className="text-xs font-bold text-gray-500">
+                              ZAR {totalCost.toLocaleString()} / mo
+                            </span>
+                          </div>
+                        </td>
+                        <td className="p-4 text-right">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={() => setExpandedUser(isExpanded ? null : user.id)}
+                            className="text-xs font-bold text-blue-700 hover:bg-blue-100"
+                          >
+                            Inspect <ChevronDown className={`h-4 w-4 ml-1 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                          </Button>
+                        </td>
+                      </tr>
 
-                    </tr>
+                      {/* EXPANDED VIEW: Shows exactly what licenses this user holds */}
+                      {isExpanded && (
+                        <tr className="bg-gray-50 border-b border-gray-200">
+                          <td colSpan={5} className="p-0">
+                            <div className="p-4 border-l-4 border-l-blue-500 bg-gradient-to-r from-blue-50/50 to-transparent">
+                              <h4 className="text-[10px] font-black uppercase tracking-widest text-gray-500 mb-3 flex items-center">
+                                <Database className="h-3 w-3 mr-1.5" /> Assigned Capabilities
+                              </h4>
+                              
+                              {assignedSystems.length === 0 ? (
+                                <p className="text-xs text-gray-500 italic">No active licenses assigned to this identity.</p>
+                              ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                                  {assignedSystems.map((sys: any, idx: number) => {
+                                    // If we are investigating a specific system, highlight it in red to show it's a target
+                                    const isTarget = investigationQuery && sys.name.toLowerCase().includes(investigationQuery.toLowerCase());
+                                    
+                                    return (
+                                      <div key={idx} className={`p-3 rounded-lg border ${isTarget ? 'bg-red-50 border-red-200 shadow-sm' : 'bg-white border-gray-200'}`}>
+                                        <div className="flex justify-between items-start mb-1">
+                                          <p className={`text-xs font-bold ${isTarget ? 'text-red-900' : 'text-gray-900'}`}>{sys.name}</p>
+                                          {isTarget && <AlertCircle className="h-3.5 w-3.5 text-red-600" />}
+                                        </div>
+                                        <p className="text-[10px] font-bold text-gray-500">ZAR {parseFloat(sys.price || 0).toLocaleString()} / mo</p>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </React.Fragment>
                   );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
     </div>
   );
 };

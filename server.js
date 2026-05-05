@@ -40,14 +40,12 @@ const initializeSystems = async () => {
     await pool.query(`CREATE TABLE IF NOT EXISTS settings (id SERIAL PRIMARY KEY, monthly_budget DECIMAL DEFAULT 150000.00)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS data_connectors (id SERIAL PRIMARY KEY)`);
 
-    // Ensure usage_logs exists for escalation and telemetry
     await pool.query(`
       CREATE TABLE IF NOT EXISTS usage_logs (
         id SERIAL PRIMARY KEY
       );
     `);
 
-    // The EA/CRM Request Pipeline Table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS license_requests (
         id SERIAL PRIMARY KEY,
@@ -58,7 +56,6 @@ const initializeSystems = async () => {
       );
     `);
 
-    // The PMO Pipeline Table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pmo_projects (
         id VARCHAR(50) PRIMARY KEY,
@@ -71,7 +68,6 @@ const initializeSystems = async () => {
       );
     `);
 
-    // SCHEMA GUARD: Repair PMO Projects table if columns are missing
     const pmoColumns = [
       { name: 'project_name', type: 'VARCHAR(255)' },
       { name: 'department', type: 'VARCHAR(100)' },
@@ -85,7 +81,6 @@ const initializeSystems = async () => {
       await pool.query(`ALTER TABLE pmo_projects ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
     }
 
-    // SCHEMA GUARD: Repair Usage Logs table and drop restrictive constraints for global events
     const usageColumns = [
       { name: 'user_id', type: 'INTEGER' },
       { name: 'app_id', type: 'INTEGER' },
@@ -155,7 +150,6 @@ const authenticateToken = (req, res, next) => {
 };
 
 // --- 4. AUTHENTICATION ROUTES ---
-
 app.post('/api/auth/setup', async (req, res) => {
   try {
     const hashedPassword = await bcrypt.hash('Admin2026!', 10);
@@ -211,10 +205,10 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Login crash" }); }
 });
 
-// --- 5. CORE METRICS (WITH EA RBAC ENFORCEMENT) ---
+// --- 5. CORE METRICS (UPDATED TO `IS NOT TRUE` FOR RESILIENCE) ---
 app.get('/api/metrics/monthly-cost', authenticateToken, async (req, res) => {
   try {
-    let query = 'SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE is_revoked = FALSE';
+    let query = 'SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE is_revoked IS NOT TRUE';
     let params = [];
     if (req.user.role === 'DepartmentHead' && req.user.deptId) {
       query += ' AND owning_department_id = $1';
@@ -227,7 +221,7 @@ app.get('/api/metrics/monthly-cost', authenticateToken, async (req, res) => {
 
 app.get('/api/metrics/trends', authenticateToken, async (req, res) => {
   try {
-    let spendQ = 'SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE is_revoked = FALSE';
+    let spendQ = 'SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE is_revoked IS NOT TRUE';
     let budgetQ = 'SELECT SUM(allocated_budget) as total FROM departments';
     let params = [];
 
@@ -252,7 +246,7 @@ app.get('/api/metrics/departmental-spend', authenticateToken, async (req, res) =
   try {
     let query = `
       SELECT d.id, d.name as department, COALESCE(SUM(s.monthly_cost), 0) as total_spend, d.allocated_budget as budget_limit
-      FROM departments d LEFT JOIN active_subscriptions s ON d.id = s.owning_department_id AND s.is_revoked = FALSE
+      FROM departments d LEFT JOIN active_subscriptions s ON d.id = s.owning_department_id AND s.is_revoked IS NOT TRUE
     `;
     let params = [];
     if (req.user.role === 'DepartmentHead' && req.user.deptId) {
@@ -290,13 +284,13 @@ app.get('/api/metrics/usage/category', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- 7. CATALOG, IDENTITY & SUBSCRIPTIONS (WITH EA RBAC ENFORCEMENT) ---
+// --- 7. CATALOG, IDENTITY & SUBSCRIPTIONS (UPDATED WITH LEFT JOINS) ---
 app.get('/api/systems', authenticateToken, async (req, res) => {
   try {
     const r = await pool.query(`
       SELECT s.id, s.name, s.functional_category as category, s.vendor, s.deployment_architecture as architecture, s.created_at,
       s.deployment_type, s.lifecycle_status,
-      (SELECT COUNT(*) FROM active_subscriptions sub WHERE sub.system_id = s.id AND sub.is_revoked = FALSE) as active_seats
+      (SELECT COUNT(*) FROM active_subscriptions sub WHERE sub.system_id = s.id AND sub.is_revoked IS NOT TRUE) as active_seats
       FROM enterprise_systems s ORDER BY s.name ASC
     `);
     res.json(r.rows);
@@ -333,7 +327,7 @@ app.get('/api/users', authenticateToken, async (req, res) => {
   try {
     let query = `
       SELECT p.id, p.email, d.name as department, TO_CHAR(p.onboarding_date, 'YYYY-MM-DD') as onboarding_date,
-      COALESCE(json_agg(json_build_object('name', es.name, 'price', s.monthly_cost)) FILTER (WHERE es.id IS NOT NULL AND s.is_revoked = FALSE), '[]') as assigned_systems
+      COALESCE(json_agg(json_build_object('name', es.name, 'price', s.monthly_cost)) FILTER (WHERE es.id IS NOT NULL AND s.is_revoked IS NOT TRUE), '[]') as assigned_systems
       FROM personnel p LEFT JOIN departments d ON p.department_id = d.id LEFT JOIN active_subscriptions s ON p.id = s.assigned_user_id
       LEFT JOIN enterprise_systems es ON s.system_id = es.id
     `;
@@ -349,12 +343,20 @@ app.get('/api/users', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// GET Subscriptions (Ledger Reading)
+// UPGRADED: Financial Ledger Query to prevent Silent JOIN failures
 app.get('/api/subscriptions', authenticateToken, async (req, res) => {
   try {
     let query = `
-      SELECT s.id, es.name, es.functional_category as category, s.monthly_cost as price, TO_CHAR(s.start_date, 'YYYY-MM-DD') as start_date, s.associated_project as project_name
-      FROM active_subscriptions s JOIN enterprise_systems es ON s.system_id = es.id WHERE s.is_revoked = FALSE
+      SELECT 
+        s.id, 
+        COALESCE(es.name, 'Unlinked System (ID: ' || s.system_id || ')') as name, 
+        COALESCE(es.functional_category, 'Uncategorized') as category, 
+        s.monthly_cost as price, 
+        TO_CHAR(s.start_date, 'YYYY-MM-DD') as start_date, 
+        s.associated_project as project_name
+      FROM active_subscriptions s 
+      LEFT JOIN enterprise_systems es ON s.system_id = es.id 
+      WHERE s.is_revoked IS NOT TRUE
     `;
     let params = [];
     if (req.user.role === 'DepartmentHead' && req.user.deptId) {
@@ -367,7 +369,6 @@ app.get('/api/subscriptions', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// POST Subscriptions (Financial Procurement / Buy Button)
 app.post('/api/subscriptions', authenticateToken, async (req, res) => {
   const { system_id, department_id, assigned_user_id, monthly_cost, associated_project } = req.body;
   
@@ -391,12 +392,10 @@ app.post('/api/subscriptions', authenticateToken, async (req, res) => {
   }
 });
 
-// DELETE Subscriptions (Cancel Procurement / Revoke Button)
 app.delete('/api/subscriptions/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
   
   try {
-    // RBAC Check: Lock department heads to only revoking their own budget items
     let query = 'UPDATE active_subscriptions SET is_revoked = TRUE WHERE id = $1';
     let params = [id];
     
@@ -417,13 +416,14 @@ app.delete('/api/subscriptions/:id', authenticateToken, async (req, res) => {
   }
 });
 
-// --- 8. RECOMMENDATIONS ---
+// --- 8. RECOMMENDATIONS & INSIGHTS ---
 app.get('/api/recommendations', authenticateToken, async (req, res) => {
   try {
     let query = `
-      SELECT s.id, es.name, s.monthly_cost 
-      FROM active_subscriptions s JOIN enterprise_systems es ON s.system_id = es.id 
-      WHERE s.is_revoked = FALSE
+      SELECT s.id, COALESCE(es.name, 'Legacy System') as name, s.monthly_cost 
+      FROM active_subscriptions s 
+      LEFT JOIN enterprise_systems es ON s.system_id = es.id 
+      WHERE s.is_revoked IS NOT TRUE
     `;
     let params = [];
     if (req.user.role === 'DepartmentHead' && req.user.deptId) {
@@ -442,12 +442,12 @@ app.get('/api/recommendations', authenticateToken, async (req, res) => {
 
 app.get('/api/ai/insights', authenticateToken, async (req, res) => {
   try {
-    const costRes = await pool.query(`SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE is_revoked = FALSE`);
+    const costRes = await pool.query(`SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE is_revoked IS NOT TRUE`);
     res.json({ insight: `Executive Summary: Current burn rate is ZAR ${parseFloat(costRes.rows[0].total || 0).toLocaleString()}. Redundancies detected in Architecture tools. Recommend consolidating license pools to reclaim ~12% of budget.`, status: "live" });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- 9. MISC, AUDIT & CONNECTORS (WITH EA RBAC ENFORCEMENT) ---
+// --- 9. MISC, AUDIT & CONNECTORS ---
 app.get('/api/settings', authenticateToken, async (req, res) => {
   try {
     const r = await pool.query('SELECT monthly_budget FROM settings LIMIT 1');
@@ -487,8 +487,8 @@ app.get('/api/departments/:id/details', authenticateToken, async (req, res) => {
 
     const [usersRes, appsRes, spendRes] = await Promise.all([
       pool.query(`SELECT email FROM personnel WHERE department_id = $1`, [id]),
-      pool.query(`SELECT es.name, s.monthly_cost as price, es.functional_category as category FROM active_subscriptions s JOIN enterprise_systems es ON s.system_id = es.id WHERE s.owning_department_id = $1 AND s.is_revoked = FALSE`, [id]),
-      pool.query(`SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE owning_department_id = $1 AND is_revoked = FALSE`, [id])
+      pool.query(`SELECT es.name, s.monthly_cost as price, es.functional_category as category FROM active_subscriptions s LEFT JOIN enterprise_systems es ON s.system_id = es.id WHERE s.owning_department_id = $1 AND s.is_revoked IS NOT TRUE`, [id]),
+      pool.query(`SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE owning_department_id = $1 AND is_revoked IS NOT TRUE`, [id])
     ]);
 
     res.json({ department: deptRes.rows[0], users: usersRes.rows, apps: appsRes.rows, totalSpend: parseFloat(spendRes.rows[0].total || 0) });
@@ -500,7 +500,6 @@ app.get('/api/connectors', authenticateToken, async (req, res) => {
     const r = await pool.query('SELECT id, provider_name, api_endpoint, status, last_sync FROM data_connectors ORDER BY id DESC');
     res.json(r.rows);
   } catch (err) { 
-    console.error("❌ GET Connectors Failed:", err.message);
     res.json([]); 
   }
 });
@@ -517,13 +516,11 @@ app.post('/api/connectors', authenticateToken, async (req, res) => {
     );
     res.json({ success: true });
   } catch (err) { 
-    console.error("❌ POST Connector Failed:", err.message);
     res.status(500).json({ error: err.message }); 
   }
 });
 
 // --- 10. EA GOVERNANCE, PMO & CRM PIPELINES ---
-
 app.post('/api/pmo/escalate', authenticateToken, async (req, res) => {
   const { project_id, reason } = req.body;
   const userId = req.user.id || null; 
@@ -534,8 +531,6 @@ app.post('/api/pmo/escalate', authenticateToken, async (req, res) => {
        VALUES ($1, $2, $3, $4, CURRENT_DATE)`,
       [userId, null, `ESCALATION: Project ${project_id} - ${reason || 'Funding Bottleneck'}`, 0]
     );
-
-    console.log(`🚨 CIO ALERT: Project ${project_id} has been escalated for executive review.`);
     res.json({ success: true, message: "Escalated to CIO successfully." });
   } catch (err) {
     res.status(500).json({ error: "Escalation failed: " + err.message });
@@ -615,7 +610,6 @@ app.put('/api/requests/:id/vetting', authenticateToken, async (req, res) => {
       [alignment_score, ea_status, ea_comments, ea_status === 'Vetoed' ? 'Rejected' : 'Pending', id]
     );
 
-    // If approved, push to PMO Register automatically
     if (ea_status === 'Approved') {
       const reqDetails = await pool.query(`SELECT es.name, au.department_id FROM license_requests lr JOIN enterprise_systems es ON lr.system_id = es.id LEFT JOIN admin_users au ON lr.user_id = au.id WHERE lr.id = $1`, [id]);
       
