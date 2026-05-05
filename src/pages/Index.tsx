@@ -221,10 +221,17 @@ const Index = () => {
     return "Other";
   };
 
-  const allSystemNames = Array.from(new Set(systems.map(s => s.name))).sort();
-  const allDeptNames = Array.from(new Set(users.map(u => u.department).filter(d => d && d !== 'Unassigned'))).sort();
+  // --- FIXED DROPDOWN FILTER LOGIC ---
+  const allSystemNames = Array.from(
+    new Set(systems.map((s: any) => s.name).filter(Boolean))
+  ).sort() as string[];
+  
+  const allDeptNames = Array.from(new Set(users.map(u => u.department).filter(d => d && d !== 'Unassigned'))).sort() as string[];
 
   const availableSystems = allSystemNames.filter(sys => {
+    // If viewing the global dashboard, show ALL systems in the dropdown
+    if (biUnitFilter === "All" && biDeptFilter === "All") return true;
+
     return users.some(u => {
       const matchUnit = biUnitFilter === "All" || getUnitForDept(u.department) === biUnitFilter;
       const matchDept = biDeptFilter === "All" || u.department === biDeptFilter;
@@ -424,7 +431,12 @@ const Index = () => {
                 setBiDeptFilter('All');
             }}
         /> : <UnauthorizedView />;
-      case "users": return ['SuperAdmin', 'EA', 'DepartmentHead'].includes(role) ? <UsersTab users={users} onRefresh={refreshAllData} /> : <UnauthorizedView />;
+      case "users": return ['SuperAdmin', 'EA', 'DepartmentHead'].includes(role) ? 
+        <UsersTab 
+            users={users} 
+            onRefresh={refreshAllData} 
+            investigationQuery={biSystemFilter !== "All" ? biSystemFilter : undefined}
+        /> : <UnauthorizedView />;
       case "ea-strategy": return ['SuperAdmin', 'EA'].includes(role) ? <EAStrategyTab /> : <UnauthorizedView />;
       default: return renderDashboardContent();
     }

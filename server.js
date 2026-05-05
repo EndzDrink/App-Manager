@@ -326,21 +326,39 @@ app.post('/api/systems', authenticateToken, async (req, res) => {
 app.get('/api/users', authenticateToken, async (req, res) => {
   try {
     let query = `
-      SELECT p.id, p.email, d.name as department, TO_CHAR(p.onboarding_date, 'YYYY-MM-DD') as onboarding_date,
-      COALESCE(json_agg(json_build_object('name', es.name, 'price', s.monthly_cost)) FILTER (WHERE es.id IS NOT NULL AND s.is_revoked IS NOT TRUE), '[]') as assigned_systems
-      FROM personnel p LEFT JOIN departments d ON p.department_id = d.id LEFT JOIN active_subscriptions s ON p.id = s.assigned_user_id
+      SELECT 
+        p.id, 
+        p.email, 
+        d.name as department, 
+        TO_CHAR(p.onboarding_date, 'YYYY-MM-DD') as onboarding_date,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'name', COALESCE(es.name, 'Unlinked System (ID: ' || s.system_id || ')'), 
+              'price', COALESCE(s.monthly_cost, 0)
+            )
+          ) FILTER (WHERE s.id IS NOT NULL AND s.is_revoked IS NOT TRUE), 
+          '[]'
+        ) as assigned_systems
+      FROM personnel p 
+      LEFT JOIN departments d ON p.department_id = d.id 
+      LEFT JOIN active_subscriptions s ON p.id = s.assigned_user_id
       LEFT JOIN enterprise_systems es ON s.system_id = es.id
     `;
+    
     let params = [];
     if (req.user.role === 'DepartmentHead' && req.user.deptId) {
       query += ' WHERE p.department_id = $1';
       params.push(req.user.deptId);
     }
-    query += ' GROUP BY p.id, d.name';
+    query += ' GROUP BY p.id, d.name ORDER BY p.id ASC';
 
     const r = await pool.query(query, params);
     res.json(r.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    console.error("Failed to fetch users:", err);
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
 // UPGRADED: Financial Ledger Query to prevent Silent JOIN failures
