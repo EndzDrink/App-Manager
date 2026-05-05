@@ -41,7 +41,6 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
   const fetchMyRequests = async () => {
     try {
       const token = localStorage.getItem('appManagerToken');
-      // In a real flow, this targets a specific /api/requests/me endpoint
       const res = await fetch(`${API_URL}/api/requests/me`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
@@ -101,14 +100,19 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
     setIsSubmitting(true);
 
     try {
+      const token = localStorage.getItem('appManagerToken');
       const res = await fetch(`${API_URL}/api/systems`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` // Added Authorization Header
+        },
         body: JSON.stringify({ 
           name: newName, 
-          category: newCategory,
+          functional_category: newCategory, // Fixed schema mismatch
           vendor: newVendor || 'Internal/Unknown',
-          deployment_type: newDeployment
+          deployment_type: newDeployment,
+          deployment_architecture: newDeployment.includes('SaaS') ? 'Cloud' : 'On-Premise' // Aligning to DB schema
         })
       });
       const data = await res.json();
@@ -211,7 +215,6 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
               </div>
             </div>
             
-            {/* INJECTED: Request License Action in Drill-Down */}
             <div className="flex items-center gap-4">
               <div className="text-right hidden sm:block">
                 <p className="text-xs text-blue-900/60 uppercase font-bold tracking-wider mb-1">Catalog Entry Date</p>
