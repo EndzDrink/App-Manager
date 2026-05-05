@@ -58,7 +58,7 @@ const initializeSystems = async () => {
       );
     `);
 
-    // The PMO Pipeline Table (UPDATED to project_name)
+    // The PMO Pipeline Table
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pmo_projects (
         id VARCHAR(50) PRIMARY KEY,
@@ -290,7 +290,7 @@ app.get('/api/metrics/usage/category', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- 7. CATALOG & IDENTITY (WITH EA RBAC ENFORCEMENT) ---
+// --- 7. CATALOG, IDENTITY & SUBSCRIPTIONS (WITH EA RBAC ENFORCEMENT) ---
 app.get('/api/systems', authenticateToken, async (req, res) => {
   try {
     const r = await pool.query(`
@@ -349,6 +349,7 @@ app.get('/api/users', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// GET Subscriptions (Ledger Reading)
 app.get('/api/subscriptions', authenticateToken, async (req, res) => {
   try {
     let query = `
@@ -364,6 +365,56 @@ app.get('/api/subscriptions', authenticateToken, async (req, res) => {
     const r = await pool.query(query, params);
     res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST Subscriptions (Financial Procurement / Buy Button)
+app.post('/api/subscriptions', authenticateToken, async (req, res) => {
+  const { system_id, department_id, assigned_user_id, monthly_cost, associated_project } = req.body;
+  
+  try {
+    const result = await pool.query(
+      `INSERT INTO active_subscriptions 
+       (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked) 
+       VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, FALSE) RETURNING *`,
+      [
+        system_id, 
+        department_id || null, 
+        assigned_user_id || null, 
+        monthly_cost || 0, 
+        associated_project || 'Operational (No Project)'
+      ]
+    );
+    res.json({ success: true, subscription: result.rows[0] });
+  } catch (err) { 
+    console.error("❌ Failed to add subscription:", err.message);
+    res.status(500).json({ error: err.message }); 
+  }
+});
+
+// DELETE Subscriptions (Cancel Procurement / Revoke Button)
+app.delete('/api/subscriptions/:id', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  
+  try {
+    // RBAC Check: Lock department heads to only revoking their own budget items
+    let query = 'UPDATE active_subscriptions SET is_revoked = TRUE WHERE id = $1';
+    let params = [id];
+    
+    if (req.user.role === 'DepartmentHead' && req.user.deptId) {
+      query += ' AND owning_department_id = $2';
+      params.push(req.user.deptId);
+    }
+    
+    const result = await pool.query(query, params);
+    
+    if (result.rowCount === 0) {
+        return res.status(403).json({ error: "Access Denied: You cannot revoke subscriptions outside your departmental budget." });
+    }
+    
+    res.json({ success: true });
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
 // --- 8. RECOMMENDATIONS ---
@@ -564,7 +615,7 @@ app.put('/api/requests/:id/vetting', authenticateToken, async (req, res) => {
       [alignment_score, ea_status, ea_comments, ea_status === 'Vetoed' ? 'Rejected' : 'Pending', id]
     );
 
-    // If approved, push to PMO Register automatically (UPDATED to project_name)
+    // If approved, push to PMO Register automatically
     if (ea_status === 'Approved') {
       const reqDetails = await pool.query(`SELECT es.name, au.department_id FROM license_requests lr JOIN enterprise_systems es ON lr.system_id = es.id LEFT JOIN admin_users au ON lr.user_id = au.id WHERE lr.id = $1`, [id]);
       

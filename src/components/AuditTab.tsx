@@ -14,7 +14,6 @@ import {
   GitMerge,
   X,
   ArrowRight,
-  Send,
   Settings2,
   ArrowLeft,
   Activity,
@@ -51,10 +50,10 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
   const [ticketId, setTicketId] = useState<string>('');
   const [resolvedCategories, setResolvedCategories] = useState<string[]>([]);
 
-  // --- UPDATED MOCK DATA: Solving Problem 4 & 5 with specific Action Steps ---
+  // --- MOCK DATA: Actionable AG Compliance Matrix ---
   const [alignmentData] = useState([
     { 
-      id: "PMO-782", 
+      id: "PRJ-2026-782", 
       name: "e-Sign Expansion (DocuSign)", 
       ea_strategy: "Paperless Municipality", 
       status: "Orphan", 
@@ -64,7 +63,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
       owner: "Finance / IMU"
     },
     { 
-      id: "PMO-112", 
+      id: "PRJ-2026-112", 
       name: "SAP S/4HANA Migration", 
       ea_strategy: "Financial Integrity", 
       status: "Aligned", 
@@ -74,7 +73,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
       owner: "Finance Unit"
     },
     { 
-      id: "PMO-809", 
+      id: "PRJ-2026-809", 
       name: "ESRI ArcGIS Servers", 
       ea_strategy: "Smart City Infrastructure", 
       status: "Aligned", 
@@ -84,7 +83,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
       owner: "IMU - GIS"
     },
     { 
-      id: "PMO-445", 
+      id: "PRJ-2026-445", 
       name: "Slack Enterprise", 
       ea_strategy: "Missing Architecture Doc", 
       status: "Orphan", 
@@ -109,13 +108,14 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
       let matchReason = '';
       const overlap = systems.find(s => {
         const sysNameLower = s.name.toLowerCase();
-        const sysCategory = s.category ? s.category.toLowerCase() : '';
+        // Support both mapped category and raw functional_category from DB
+        const sysCategory = (s.category || s.functional_category || '').toLowerCase();
         
         if (lowerSpec.includes(sysNameLower)) { matchReason = 'Direct Name Match'; return true; }
         if (lowerSpec.length >= 3 && sysNameLower.includes(lowerSpec)) { matchReason = 'Partial Name Match'; return true; }
         const primaryBrand = sysNameLower.split(' ')[0];
         if (primaryBrand.length >= 3 && lowerSpec.includes(primaryBrand)) { matchReason = 'Brand Keyword Match'; return true; }
-        if (sysCategory && lowerSpec.includes(sysCategory)) { matchReason = `Functional Capability Overlap (${s.category})`; return true; }
+        if (sysCategory && lowerSpec.includes(sysCategory)) { matchReason = `Functional Capability Overlap (${s.category || s.functional_category})`; return true; }
 
         return false;
       });
@@ -173,7 +173,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
   const displayDuplications = duplications.filter(dup => !resolvedCategories.includes(dup.category));
 
   return (
-    <div className="animate-in fade-in duration-500 h-full flex flex-col max-w-[1600px] mx-auto relative">
+    <div className="animate-in fade-in duration-500 h-full flex flex-col max-w-[1600px] mx-auto relative pb-12">
       
       {/* 1. EXECUTIVE HEADER */}
       <div className="mb-6 flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-gray-200 pb-4 shrink-0">
@@ -226,6 +226,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 flex-1 min-h-0">
+            {/* TENDER GATEKEEPER */}
             <Card className="xl:col-span-2 border border-sky-200 shadow-sm rounded-xl overflow-hidden bg-white flex flex-col h-full">
               <div className="bg-blue-900 px-5 py-3 flex items-center justify-between shrink-0">
                 <div className="flex items-center text-white">
@@ -292,6 +293,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
               </div>
             </Card>
 
+            {/* OVERLAPS & DEPT FLAGS */}
             <Card className="xl:col-span-1 border border-gray-200 shadow-sm rounded-xl bg-white flex flex-col h-full overflow-hidden">
               <div className="flex border-b border-gray-200 bg-gray-50 shrink-0">
                 <button onClick={() => setActiveSideTab('duplications')} className={`flex-1 py-3 text-xs font-bold uppercase transition-colors ${activeSideTab === 'duplications' ? 'bg-white text-blue-900 border-b-2 border-yellow-400' : 'text-gray-500 hover:bg-gray-100'}`}>Overlaps {displayDuplications.length > 0 && <span className="ml-1 bg-red-100 text-red-600 px-1 rounded-full text-[9px]">{displayDuplications.length}</span>}</button>
@@ -315,15 +317,32 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
 
                 {activeSideTab === 'departments' && (
                   <div className="space-y-3">
-                    {deptSpend.map((dept, idx) => (
-                      <div key={idx} onClick={() => onDepartmentClick(dept.id)} className="bg-white border border-gray-200 p-3 rounded-lg flex justify-between items-center cursor-pointer hover:border-sky-300 hover:bg-sky-50 transition-colors group overflow-hidden">
-                        <div className="flex-1 min-w-0 pr-3">
-                          <p className="text-xs font-bold text-blue-900 truncate">{dept.department || dept.name}</p>
-                          <p className="text-[10px] text-gray-500 truncate">ZAR {(parseFloat(dept.total_spend || 0)).toLocaleString()} active burn</p>
+                    {deptSpend.map((dept, idx) => {
+                      // Dynamically calculate Shadow IT Risk based on spend
+                      const spend = parseFloat(dept.total_spend || 0);
+                      const isHighRisk = spend > 15000;
+                      const isMedRisk = spend > 5000 && spend <= 15000;
+                      
+                      return (
+                        <div key={idx} onClick={() => onDepartmentClick(dept.id)} className="bg-white border border-gray-200 p-3 rounded-lg flex justify-between items-center cursor-pointer hover:border-sky-300 hover:bg-sky-50 transition-colors group overflow-hidden">
+                          <div className="flex-1 min-w-0 pr-3">
+                            <p className="text-xs font-bold text-blue-900 truncate flex items-center">
+                              {dept.department || dept.name}
+                            </p>
+                            <div className="flex items-center mt-1 gap-2">
+                              <p className="text-[10px] text-gray-500 truncate">ZAR {spend.toLocaleString()} burn</p>
+                              <span className={`text-[8px] font-black uppercase px-1.5 py-0.5 rounded border tracking-widest ${isHighRisk ? 'bg-red-50 text-red-600 border-red-200' : isMedRisk ? 'bg-orange-50 text-orange-600 border-orange-200' : 'bg-green-50 text-green-600 border-green-200'}`}>
+                                {isHighRisk ? 'High Risk' : isMedRisk ? 'Med Risk' : 'Low Risk'}
+                              </span>
+                            </div>
+                          </div>
+                          <Button variant="ghost" size="sm" className="shrink-0 text-[10px] font-bold text-sky-600 px-2 h-7 group-hover:bg-white border border-transparent group-hover:border-sky-200 shadow-sm">Identity Matrix</Button>
                         </div>
-                        <Button variant="ghost" size="sm" className="shrink-0 text-[10px] font-bold text-sky-600 px-2 h-7 group-hover:bg-white border border-transparent group-hover:border-sky-200 shadow-sm">Audit</Button>
-                      </div>
-                    ))}
+                      );
+                    })}
+                    {deptSpend.length === 0 && (
+                      <div className="text-center py-10 text-gray-400 font-bold text-xs">No department data available.</div>
+                    )}
                   </div>
                 )}
               </div>
@@ -331,7 +350,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
           </div>
         </div>
       ) : (
-        /* 2. ACTIONABLE AG COMPLIANCE MATRIX (Solving Problem 4 & 5) */
+        /* 2. ACTIONABLE AG COMPLIANCE MATRIX */
         <div className="flex-1 animate-in slide-in-from-bottom-4 duration-500 min-h-0 flex flex-col">
           <Card className="border-blue-200 shadow-sm rounded-xl bg-white overflow-hidden flex flex-col h-full">
             <div className="bg-blue-900 px-6 py-4 flex justify-between items-center text-white shrink-0">
@@ -401,7 +420,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
         </div>
       )}
 
-      {/* 3. STRATEGIC ACTION SIDE PANEL (The "No More Guessing" Panel) */}
+      {/* 3. STRATEGIC ACTION SIDE PANEL */}
       {selectedAlignment && (
         <div className="fixed inset-0 bg-blue-900/40 backdrop-blur-sm z-[110] flex items-center justify-end animate-in fade-in">
           <div className="bg-white h-screen w-full max-w-md shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
@@ -459,7 +478,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
         </div>
       )}
 
-      {/* 4. OPERATIONAL RESOLUTION MODAL (Existing Modal) */}
+      {/* 4. OPERATIONAL RESOLUTION MODAL */}
       {selectedDuplicate && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
