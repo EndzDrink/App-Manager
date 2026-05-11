@@ -205,7 +205,7 @@ app.post('/api/auth/login', async (req, res) => {
   } catch (err) { res.status(500).json({ error: "Login crash" }); }
 });
 
-// --- 5. CORE METRICS (UPDATED TO `IS NOT TRUE` FOR RESILIENCE) ---
+// --- 5. CORE METRICS ---
 app.get('/api/metrics/monthly-cost', authenticateToken, async (req, res) => {
   try {
     let query = 'SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE is_revoked IS NOT TRUE';
@@ -284,7 +284,7 @@ app.get('/api/metrics/usage/category', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- 7. CATALOG, IDENTITY & SUBSCRIPTIONS (UPDATED WITH LEFT JOINS) ---
+// --- 7. CATALOG, IDENTITY & SUBSCRIPTIONS ---
 app.get('/api/systems', authenticateToken, async (req, res) => {
   try {
     const r = await pool.query(`
@@ -323,6 +323,7 @@ app.post('/api/systems', authenticateToken, async (req, res) => {
   }
 });
 
+// Financial Ledger Query to prevent Silent JOIN failures
 app.get('/api/users', authenticateToken, async (req, res) => {
   try {
     let query = `
@@ -334,11 +335,11 @@ app.get('/api/users', authenticateToken, async (req, res) => {
         COALESCE(
           json_agg(
             json_build_object(
-              'name', COALESCE(es.name, 'Unlinked System (ID: ' || s.system_id || ')'), 
+              'name', COALESCE(es.name, 'Unlinked System (ID: ' || COALESCE(s.system_id::text, 'Unknown') || ')'), 
               'price', COALESCE(s.monthly_cost, 0)
             )
           ) FILTER (WHERE s.id IS NOT NULL AND s.is_revoked IS NOT TRUE), 
-          '[]'
+          '[]'::json
         ) as assigned_systems
       FROM personnel p 
       LEFT JOIN departments d ON p.department_id = d.id 
@@ -356,17 +357,17 @@ app.get('/api/users', authenticateToken, async (req, res) => {
     const r = await pool.query(query, params);
     res.json(r.rows);
   } catch (err) { 
-    console.error("Failed to fetch users:", err);
     res.status(500).json({ error: err.message }); 
   }
 });
 
-// UPGRADED: Financial Ledger Query to prevent Silent JOIN failures
+// --- FETCH ALL ACTIVE SUBSCRIPTIONS ---
 app.get('/api/subscriptions', authenticateToken, async (req, res) => {
   try {
     let query = `
       SELECT 
         s.id, 
+        s.assigned_user_id,
         COALESCE(es.name, 'Unlinked System (ID: ' || s.system_id || ')') as name, 
         COALESCE(es.functional_category, 'Uncategorized') as category, 
         s.monthly_cost as price, 
@@ -377,6 +378,8 @@ app.get('/api/subscriptions', authenticateToken, async (req, res) => {
       WHERE s.is_revoked IS NOT TRUE
     `;
     let params = [];
+    
+    // RBAC: Department Heads only see their own ledger
     if (req.user.role === 'DepartmentHead' && req.user.deptId) {
       query += ' AND s.owning_department_id = $1';
       params.push(req.user.deptId);
@@ -384,28 +387,84 @@ app.get('/api/subscriptions', authenticateToken, async (req, res) => {
 
     const r = await pool.query(query, params);
     res.json(r.rows);
-  } catch (err) { res.status(500).json({ error: err.message }); }
+  } catch (err) { 
+    res.status(500).json({ error: err.message }); 
+  }
 });
 
 app.post('/api/subscriptions', authenticateToken, async (req, res) => {
   const { system_id, department_id, assigned_user_id, monthly_cost, associated_project } = req.body;
   
   try {
-    const result = await pool.query(
-      `INSERT INTO active_subscriptions 
-       (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked) 
-       VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, FALSE) RETURNING *`,
-      [
-        system_id, 
-        department_id || null, 
-        assigned_user_id || null, 
-        monthly_cost || 0, 
-        associated_project || 'Operational (No Project)'
-      ]
-    );
-    res.json({ success: true, subscription: result.rows[0] });
+    // START TRANSACTION: We want this to be all-or-nothing
+    await pool.query('BEGIN');
+
+    let fulfilledUsers = [];
+
+    // SCENARIO A: Direct single-user assignment
+    if (assigned_user_id) {
+      const result = await pool.query(
+        `INSERT INTO active_subscriptions 
+         (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked) 
+         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, FALSE) RETURNING *`,
+        [system_id, department_id || 1, assigned_user_id, monthly_cost || 0, associated_project || 'Operational']
+      );
+      
+      // Clear any pending requests for this specific user
+      await pool.query(
+        `UPDATE license_requests SET status = 'Fulfilled' WHERE user_id = $1 AND system_id = $2`,
+        [assigned_user_id, system_id]
+      );
+      
+      fulfilledUsers.push(assigned_user_id);
+    } 
+    // SCENARIO B: Pool Purchase -> AUTO-FULFILLMENT (The Golden Thread)
+    else {
+      // 1. Find all 'Approved' CRM requests for this system within this department
+      const pendingReqs = await pool.query(
+        `SELECT lr.id, lr.user_id 
+         FROM license_requests lr
+         JOIN admin_users au ON lr.user_id = au.id
+         WHERE lr.system_id = $1 AND lr.ea_status = 'Approved' AND lr.status = 'Pending' AND au.department_id = $2`,
+        [system_id, department_id || 1]
+      );
+
+      if (pendingReqs.rowCount > 0) {
+        // 2. Loop through and fulfill each approved request instantly
+        for (let req of pendingReqs.rows) {
+          await pool.query(
+            `INSERT INTO active_subscriptions 
+             (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked) 
+             VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, FALSE)`,
+            [system_id, department_id || 1, req.user_id, monthly_cost || 0, associated_project || 'Automated CRM Fulfillment']
+          );
+
+          // 3. Mark request as fulfilled
+          await pool.query(`UPDATE license_requests SET status = 'Fulfilled' WHERE id = $1`, [req.id]);
+          fulfilledUsers.push(req.user_id);
+        }
+      } else {
+        // 3. If no pending requests, just log it as an unassigned pool license
+        await pool.query(
+          `INSERT INTO active_subscriptions 
+           (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked) 
+           VALUES ($1, $2, NULL, $3, $4, CURRENT_DATE, FALSE)`,
+          [system_id, department_id || 1, monthly_cost || 0, associated_project || 'Operational Pool']
+        );
+      }
+    }
+
+    await pool.query('COMMIT');
+    res.json({ 
+      success: true, 
+      message: fulfilledUsers.length > 0 
+        ? `Procured and auto-fulfilled ${fulfilledUsers.length} pending staff requests.` 
+        : `License procured and added to department pool.` 
+    });
+
   } catch (err) { 
-    console.error("❌ Failed to add subscription:", err.message);
+    await pool.query('ROLLBACK');
+    console.error("❌ Procurement & Auto-Fulfillment Failed:", err.message);
     res.status(500).json({ error: err.message }); 
   }
 });
@@ -616,8 +675,9 @@ app.put('/api/requests/:id/vetting', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { alignment_score, ea_status, ea_comments } = req.body;
 
-  if (!['SuperAdmin', 'EA'].includes(req.user.role)) {
-    return res.status(403).json({ error: "Only Enterprise Architecture can score alignment." });
+  // RBAC: Added CRMHead to match the frontend Action Inbox permissions
+  if (!['SuperAdmin', 'EA', 'DepartmentHead', 'CRMHead'].includes(req.user.role)) {
+    return res.status(403).json({ error: "Access Denied: You do not have vetting clearance." });
   }
 
   try {
@@ -628,19 +688,7 @@ app.put('/api/requests/:id/vetting', authenticateToken, async (req, res) => {
       [alignment_score, ea_status, ea_comments, ea_status === 'Vetoed' ? 'Rejected' : 'Pending', id]
     );
 
-    if (ea_status === 'Approved') {
-      const reqDetails = await pool.query(`SELECT es.name, au.department_id FROM license_requests lr JOIN enterprise_systems es ON lr.system_id = es.id LEFT JOIN admin_users au ON lr.user_id = au.id WHERE lr.id = $1`, [id]);
-      
-      if (reqDetails.rowCount > 0) {
-        const pmoId = `PRJ-${new Date().getFullYear()}-${Math.floor(Math.random() * 900) + 100}`;
-        await pool.query(
-          `INSERT INTO pmo_projects (id, project_name, department, status, stage) VALUES ($1, $2, $3, $4, $5)`,
-          [pmoId, reqDetails.rows[0].name, 'Municipal Dept', 'Awaiting Funding', 'Budget Review']
-        );
-      }
-    }
-
-    res.json({ success: true, message: "Strategic Alignment score updated." });
+    res.json({ success: true, message: `Request successfully ${ea_status}.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

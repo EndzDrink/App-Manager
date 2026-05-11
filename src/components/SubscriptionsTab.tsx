@@ -161,7 +161,6 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
 
       {!isAdding && deptArray.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 mb-6">
-          {/* THE FIX: Explicitly stating that 'dept' is a DeptPool in the map function */}
           {deptArray.slice(0, 3).map((dept: DeptPool, i: number) => {
             const remaining = dept.budget - dept.spend;
             const avgLicenseCost = 1500; 

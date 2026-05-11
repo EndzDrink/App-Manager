@@ -80,16 +80,17 @@ const Index = () => {
     setActiveTab(newRole === 'StandardUser' ? 'systems' : 'dashboard');
   };
 
-  // --- UPDATED ROLE ACCESSIBILITY MATRIX (THE EA BLUEPRINT) ---
+  // --- FIXED ROLE ACCESSIBILITY MATRIX (RBAC) ---
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
     { id: 'systems', label: 'Enterprise Catalog', icon: Server, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin', 'EA', 'CIO', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
     { id: 'subscriptions', label: 'Subscriptions', icon: CreditCard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead'] },
     { id: 'users', label: 'Identity Matrix', icon: Users, roles: ['SuperAdmin', 'EA', 'DepartmentHead'] },
-    { id: 'recommendations', label: 'Recommendations', icon: Lightbulb, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead', 'ApplicationsHead'] },
-    { id: 'audit', label: 'Audit & Compliance', icon: ShieldCheck, roles: ['SuperAdmin', 'EA'] }, // Locked to EA only
+    // SECURED: Recommendations are now strictly locked to CIO and SuperAdmin
+    { id: 'recommendations', label: 'Recommendations', icon: Lightbulb, roles: ['SuperAdmin', 'CIO'] },
+    { id: 'audit', label: 'Audit & Compliance', icon: ShieldCheck, roles: ['SuperAdmin', 'EA'] }, 
     { id: 'ea-strategy', label: 'EA Strategy', icon: Fingerprint, roles: ['SuperAdmin', 'EA'] },
-    { id: 'admin', label: 'Settings', icon: Settings, roles: ['SuperAdmin'] } // EA DD Apex control
+    { id: 'admin', label: 'Settings', icon: Settings, roles: ['SuperAdmin'] } 
   ];
 
   const visibleNavItems = navItems.filter(item => item.roles.includes(role));
@@ -229,7 +230,6 @@ const Index = () => {
   const allDeptNames = Array.from(new Set(users.map(u => u.department).filter(d => d && d !== 'Unassigned'))).sort() as string[];
 
   const availableSystems = allSystemNames.filter(sys => {
-    // If viewing the global dashboard, show ALL systems in the dropdown
     if (biUnitFilter === "All" && biDeptFilter === "All") return true;
 
     return users.some(u => {
@@ -355,8 +355,6 @@ const Index = () => {
       case 'EA':
       case 'CIO':
       case 'DepartmentHead':
-        // Department Head safely receives this dashboard because the backend 
-        // physically filters their monthlyCost, trends, and subscriptions.
         return (
           <CIODashboard 
             systems={systems}
@@ -388,7 +386,6 @@ const Index = () => {
 
       case 'StandardUser':
       default:
-        // StandardUsers should be auto-routed to 'systems', but this acts as a fallback
         return (
           <div className="animate-in fade-in duration-500 pb-12">
             <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-center items-center text-center min-h-[450px] w-full">
@@ -420,7 +417,8 @@ const Index = () => {
             onDepartmentClick={handleDepartmentClick} 
             systems={systems} 
         /> : <UnauthorizedView />;
-      case "recommendations": return ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead', 'ApplicationsHead'].includes(role) ? 
+      // SECURED: Only SuperAdmin and CIO can render the recommendations view
+      case "recommendations": return ['SuperAdmin', 'CIO'].includes(role) ? 
         <RecommendationsTab 
             recommendations={recommendations} 
             onReclaim={handleReclaim} 
@@ -518,7 +516,7 @@ const Index = () => {
       
       <aside className={`${isSidebarCollapsed ? 'w-20' : 'w-64'} bg-gradient-to-b from-blue-900 to-blue-800 border-r border-blue-950 flex flex-col shrink-0 shadow-sm z-20 transition-all duration-300 ease-in-out relative`}>
         
-        <div className="h-20 flex items-center justify-center px-4 border-b border-blue-800 bg-sky-700 shrink-0">
+        <div className="h-20 flex items-center justify-center px-4 border-b border-blue-800 bg-[#00a9e0] shrink-0">
           <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'space-x-3 w-full'}`}>
             <div className="w-9 h-9 bg-yellow-400 rounded-lg flex items-center justify-center shadow-sm shrink-0">
               <Monitor className="h-5 w-5 text-blue-900" />

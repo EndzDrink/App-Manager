@@ -9,7 +9,6 @@ import {
 interface UsersTabProps {
   users: any[];
   onRefresh: () => Promise<void> | void;
-  // This captures the system name passed from the Recommendations tab
   investigationQuery?: string; 
 }
 
@@ -18,18 +17,28 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigat
   const [expandedUser, setExpandedUser] = useState<number | null>(null);
 
   useEffect(() => {
-    // If the prop changes (e.g., user clicked "Review Logs" on a different recommendation), update the search bar
     setSearchQuery(investigationQuery);
   }, [investigationQuery]);
 
-  // Filter logic: Searches by email, department, or assigned systems
+  // ARMORED FILTER LOGIC: Safely parses strings and handles nulls
   const filteredUsers = users.filter(user => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
     
     const matchesEmail = user.email?.toLowerCase().includes(query);
     const matchesDept = (user.department || '').toLowerCase().includes(query);
-    const matchesSystem = user.assigned_systems?.some((sys: any) => sys.name.toLowerCase().includes(query));
+    
+    // Safely parse the systems array
+    let safeSystems = [];
+    try {
+      safeSystems = Array.isArray(user.assigned_systems) 
+        ? user.assigned_systems 
+        : (typeof user.assigned_systems === 'string' ? JSON.parse(user.assigned_systems) : []);
+    } catch (e) {
+      safeSystems = [];
+    }
+
+    const matchesSystem = safeSystems.some((sys: any) => (sys.name || '').toLowerCase().includes(query));
     
     return matchesEmail || matchesDept || matchesSystem;
   });
@@ -119,7 +128,17 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigat
               <tbody className="divide-y divide-gray-100">
                 {filteredUsers.map((user) => {
                   const isExpanded = expandedUser === user.id;
-                  const assignedSystems = user.assigned_systems || [];
+                  
+                  // ARMORED RENDERING LOGIC: Forces parsing before attempting to map or reduce
+                  let assignedSystems = [];
+                  try {
+                    assignedSystems = Array.isArray(user.assigned_systems) 
+                      ? user.assigned_systems 
+                      : (typeof user.assigned_systems === 'string' ? JSON.parse(user.assigned_systems) : []);
+                  } catch (e) {
+                    assignedSystems = [];
+                  }
+
                   const totalCost = assignedSystems.reduce((sum: number, sys: any) => sum + parseFloat(sys.price || 0), 0);
 
                   return (
@@ -177,13 +196,12 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigat
                               ) : (
                                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
                                   {assignedSystems.map((sys: any, idx: number) => {
-                                    // If we are investigating a specific system, highlight it in red to show it's a target
-                                    const isTarget = investigationQuery && sys.name.toLowerCase().includes(investigationQuery.toLowerCase());
+                                    const isTarget = investigationQuery && (sys.name || '').toLowerCase().includes(investigationQuery.toLowerCase());
                                     
                                     return (
                                       <div key={idx} className={`p-3 rounded-lg border ${isTarget ? 'bg-red-50 border-red-200 shadow-sm' : 'bg-white border-gray-200'}`}>
                                         <div className="flex justify-between items-start mb-1">
-                                          <p className={`text-xs font-bold ${isTarget ? 'text-red-900' : 'text-gray-900'}`}>{sys.name}</p>
+                                          <p className={`text-xs font-bold ${isTarget ? 'text-red-900' : 'text-gray-900'}`}>{sys.name || 'Unlinked System'}</p>
                                           {isTarget && <AlertCircle className="h-3.5 w-3.5 text-red-600" />}
                                         </div>
                                         <p className="text-[10px] font-bold text-gray-500">ZAR {parseFloat(sys.price || 0).toLocaleString()} / mo</p>
