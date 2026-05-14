@@ -86,7 +86,6 @@ const Index = () => {
     { id: 'systems', label: 'Enterprise Catalog', icon: Server, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin', 'EA', 'CIO', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
     { id: 'subscriptions', label: 'Subscriptions', icon: CreditCard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead'] },
     { id: 'users', label: 'Identity Matrix', icon: Users, roles: ['SuperAdmin', 'EA', 'DepartmentHead'] },
-    // SECURED: Recommendations are now strictly locked to CIO and SuperAdmin
     { id: 'recommendations', label: 'Recommendations', icon: Lightbulb, roles: ['SuperAdmin', 'CIO'] },
     { id: 'audit', label: 'Audit & Compliance', icon: ShieldCheck, roles: ['SuperAdmin', 'EA'] }, 
     { id: 'ea-strategy', label: 'EA Strategy', icon: Fingerprint, roles: ['SuperAdmin', 'EA'] },
@@ -164,15 +163,25 @@ const Index = () => {
     }
   };
 
-  const fetchTrends = async () => { const res = await fetchWithAuth('/api/metrics/trends'); if (res.ok) setTrends(await res.json()); };
+  // --- FIXED: BYPASS REACT STATE FOR STRICT RBAC FETCHING ---
   const fetchAuditData = async () => { 
-    // Only attempt to fetch global audit if the user is EA/SuperAdmin
-    if (['SuperAdmin', 'EA'].includes(role)) {
-      const [dupRes, deptRes] = await Promise.all([fetchWithAuth('/api/audit/duplication'), fetchWithAuth('/api/metrics/departmental-spend')]); 
-      if (dupRes.ok) setDuplications(await dupRes.json()); 
-      if (deptRes.ok) setDeptSpend(await deptRes.json()); 
+    // We strictly pull the role directly from LocalStorage to prevent Stale State Closures
+    const currentRole = localStorage.getItem('appManagerRole') || '';
+    
+    // 1. Department Spend is needed by EA, SuperAdmin, AND Department Heads
+    if (currentRole === 'SuperAdmin' || currentRole === 'EA' || currentRole === 'DepartmentHead') {
+      const deptRes = await fetchWithAuth('/api/metrics/departmental-spend');
+      if (deptRes.ok) setDeptSpend(await deptRes.json());
+    }
+
+    // 2. Global Duplication Audit is STRICTLY for EA and SuperAdmin
+    if (currentRole === 'SuperAdmin' || currentRole === 'EA') {
+      const dupRes = await fetchWithAuth('/api/audit/duplication');
+      if (dupRes.ok) setDuplications(await dupRes.json());
     }
   };
+
+  const fetchTrends = async () => { const res = await fetchWithAuth('/api/metrics/trends'); if (res.ok) setTrends(await res.json()); };
   const fetchUsers = async () => { const res = await fetchWithAuth('/api/users'); if (res.ok) setUsers(await res.json()); };
   const fetchConnectors = async () => { const res = await fetchWithAuth('/api/connectors'); if (res.ok) setConnectors(await res.json()); };
   const fetchSettings = async () => { const res = await fetchWithAuth('/api/settings'); if (res.ok) { const d = await res.json(); setBudget(parseFloat(d.monthly_budget)); } };
@@ -417,7 +426,6 @@ const Index = () => {
             onDepartmentClick={handleDepartmentClick} 
             systems={systems} 
         /> : <UnauthorizedView />;
-      // SECURED: Only SuperAdmin and CIO can render the recommendations view
       case "recommendations": return ['SuperAdmin', 'CIO'].includes(role) ? 
         <RecommendationsTab 
             recommendations={recommendations} 

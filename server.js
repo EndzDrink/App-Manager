@@ -24,38 +24,75 @@ const pool = new Pool({
 
 pool.on('error', (err) => console.error('⚠️ Database Connection Error:', err.message));
 
-// --- 2. ROBUST DB INITIALIZATION ---
+// --- 2. ROBUST DB INITIALIZATION (Hardened with Cascading Constraints) ---
 const initializeSystems = async () => {
   try {
+    // 1. Core Tables
     await pool.query(`
       CREATE TABLE IF NOT EXISTS admin_users (
         id SERIAL PRIMARY KEY, 
         email VARCHAR(255) UNIQUE NOT NULL, 
         password_hash TEXT NOT NULL, 
-        role VARCHAR(50) DEFAULT 'StandardUser'
+        role VARCHAR(50) DEFAULT 'StandardUser',
+        department_id INTEGER
       );
     `);
     
-    await pool.query(`ALTER TABLE admin_users ADD COLUMN IF NOT EXISTS department_id INTEGER`);
     await pool.query(`CREATE TABLE IF NOT EXISTS settings (id SERIAL PRIMARY KEY, monthly_budget DECIMAL DEFAULT 150000.00)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS data_connectors (id SERIAL PRIMARY KEY)`);
 
+    // 2. Systems Catalog
     await pool.query(`
-      CREATE TABLE IF NOT EXISTS usage_logs (
-        id SERIAL PRIMARY KEY
+      CREATE TABLE IF NOT EXISTS enterprise_systems (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        vendor VARCHAR(255) DEFAULT 'Unknown Vendor',
+        functional_category VARCHAR(100),
+        deployment_architecture VARCHAR(50) DEFAULT 'Cloud',
+        deployment_type VARCHAR(50) DEFAULT 'External SaaS',
+        lifecycle_status VARCHAR(50) DEFAULT 'Standard',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
+    // 3. Departments
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS departments (
+        id SERIAL PRIMARY KEY,
+        name VARCHAR(255) NOT NULL,
+        allocated_budget DECIMAL DEFAULT 0.00
+      );
+    `);
+
+    // 4. Subscriptions Ledger (HARDENED WITH CASCADE)
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS active_subscriptions (
+        id SERIAL PRIMARY KEY,
+        system_id INTEGER REFERENCES enterprise_systems(id) ON DELETE CASCADE,
+        owning_department_id INTEGER REFERENCES departments(id) ON DELETE CASCADE,
+        assigned_user_id INTEGER REFERENCES admin_users(id) ON DELETE SET NULL,
+        monthly_cost DECIMAL DEFAULT 0.00,
+        associated_project VARCHAR(255),
+        start_date DATE DEFAULT CURRENT_DATE,
+        is_revoked BOOLEAN DEFAULT FALSE
+      );
+    `);
+
+    // 5. CRM Requests (HARDENED WITH CASCADE)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS license_requests (
         id SERIAL PRIMARY KEY,
-        user_id INTEGER,
-        system_id INTEGER,
+        user_id INTEGER REFERENCES admin_users(id) ON DELETE CASCADE,
+        system_id INTEGER REFERENCES enterprise_systems(id) ON DELETE CASCADE,
         status VARCHAR(50) DEFAULT 'Pending',
+        ea_status VARCHAR(50) DEFAULT 'Awaiting EA Vetting',
+        alignment_score INTEGER DEFAULT 0,
+        ea_comments TEXT,
         request_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
 
+    // 6. PMO Projects
     await pool.query(`
       CREATE TABLE IF NOT EXISTS pmo_projects (
         id VARCHAR(50) PRIMARY KEY,
@@ -68,42 +105,16 @@ const initializeSystems = async () => {
       );
     `);
 
-    const pmoColumns = [
-      { name: 'project_name', type: 'VARCHAR(255)' },
-      { name: 'department', type: 'VARCHAR(100)' },
-      { name: 'status', type: "VARCHAR(50) DEFAULT 'Initiative'" },
-      { name: 'stage', type: "VARCHAR(100) DEFAULT 'Scoping'" },
-      { name: 'budget', type: 'DECIMAL DEFAULT 0.00' },
-      { name: 'created_at', type: 'TIMESTAMP DEFAULT CURRENT_TIMESTAMP' }
-    ];
-
-    for (const col of pmoColumns) {
-      await pool.query(`ALTER TABLE pmo_projects ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
-    }
-
-    const usageColumns = [
-      { name: 'user_id', type: 'INTEGER' },
-      { name: 'app_id', type: 'INTEGER' },
-      { name: 'action', type: 'TEXT' },
-      { name: 'duration_minutes', type: 'INTEGER' },
-      { name: 'log_date', type: 'DATE DEFAULT CURRENT_DATE' }
-    ];
-
-    for (const col of usageColumns) {
-      await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
-    }
-    
-    await pool.query(`ALTER TABLE usage_logs DROP CONSTRAINT IF EXISTS usage_logs_app_id_fkey`);
-    await pool.query(`ALTER TABLE usage_logs DROP CONSTRAINT IF EXISTS usage_logs_user_id_fkey`);
-
-    await pool.query(`ALTER TABLE enterprise_systems ADD COLUMN IF NOT EXISTS deployment_type VARCHAR(50) DEFAULT 'External'`);
-    await pool.query(`ALTER TABLE enterprise_systems ADD COLUMN IF NOT EXISTS lifecycle_status VARCHAR(50) DEFAULT 'Standard'`);
-    
+    // 7. Usage Logs (HARDENED WITH CASCADE)
     await pool.query(`
-      ALTER TABLE license_requests 
-      ADD COLUMN IF NOT EXISTS alignment_score INTEGER DEFAULT 0,
-      ADD COLUMN IF NOT EXISTS ea_status VARCHAR(50) DEFAULT 'Awaiting EA Vetting',
-      ADD COLUMN IF NOT EXISTS ea_comments TEXT
+      CREATE TABLE IF NOT EXISTS usage_logs (
+        id SERIAL PRIMARY KEY,
+        user_id INTEGER REFERENCES admin_users(id) ON DELETE CASCADE,
+        app_id INTEGER REFERENCES enterprise_systems(id) ON DELETE CASCADE,
+        action TEXT,
+        duration_minutes INTEGER DEFAULT 0,
+        log_date DATE DEFAULT CURRENT_DATE
+      );
     `);
 
     const columnsToEnsure = [
@@ -122,27 +133,27 @@ const initializeSystems = async () => {
     await pool.query(`INSERT INTO admin_users (email, password_hash, role) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING`, ['admin@organization.com', hashedPassword, 'SuperAdmin']);
     await pool.query(`INSERT INTO settings (id, monthly_budget) VALUES (1, 150000.00) ON CONFLICT (id) DO NOTHING`);
 
-    console.log("✅ Database Schema Verified. EA/PMO/CRM Pipelines Synced.");
+    console.log("✅ Database Schema Verified & Hardened with Cascading Constraints.");
   } catch (err) { 
     console.error("❌ DB Initialization failed:", err.message); 
   }
 };
 initializeSystems();
 
-// --- 3. FORGIVING AUTHENTICATION MIDDLEWARE ---
+// --- 3. STRICT AUTHENTICATION MIDDLEWARE ---
 const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
   
+  // If there is no token, immediately throw 401 so the frontend interceptor catches it
   if (!token || token === 'null') {
-    req.user = { role: 'StandardUser' }; 
-    return next();
+    return res.status(401).json({ error: "Access Denied: No token provided." });
   }
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
-      req.user = { role: 'StandardUser' };
-      return next();
+      // If token is expired/invalid, immediately throw 401 so frontend kicks to login
+      return res.status(401).json({ error: "Session Expired or Invalid Token." });
     }
     req.user = user;
     next();
@@ -323,7 +334,6 @@ app.post('/api/systems', authenticateToken, async (req, res) => {
   }
 });
 
-// Financial Ledger Query to prevent Silent JOIN failures
 app.get('/api/users', authenticateToken, async (req, res) => {
   try {
     let query = `
@@ -379,7 +389,6 @@ app.get('/api/subscriptions', authenticateToken, async (req, res) => {
     `;
     let params = [];
     
-    // RBAC: Department Heads only see their own ledger
     if (req.user.role === 'DepartmentHead' && req.user.deptId) {
       query += ' AND s.owning_department_id = $1';
       params.push(req.user.deptId);
@@ -396,12 +405,10 @@ app.post('/api/subscriptions', authenticateToken, async (req, res) => {
   const { system_id, department_id, assigned_user_id, monthly_cost, associated_project } = req.body;
   
   try {
-    // START TRANSACTION: We want this to be all-or-nothing
     await pool.query('BEGIN');
 
     let fulfilledUsers = [];
 
-    // SCENARIO A: Direct single-user assignment
     if (assigned_user_id) {
       const result = await pool.query(
         `INSERT INTO active_subscriptions 
@@ -410,17 +417,13 @@ app.post('/api/subscriptions', authenticateToken, async (req, res) => {
         [system_id, department_id || 1, assigned_user_id, monthly_cost || 0, associated_project || 'Operational']
       );
       
-      // Clear any pending requests for this specific user
       await pool.query(
         `UPDATE license_requests SET status = 'Fulfilled' WHERE user_id = $1 AND system_id = $2`,
         [assigned_user_id, system_id]
       );
       
       fulfilledUsers.push(assigned_user_id);
-    } 
-    // SCENARIO B: Pool Purchase -> AUTO-FULFILLMENT (The Golden Thread)
-    else {
-      // 1. Find all 'Approved' CRM requests for this system within this department
+    } else {
       const pendingReqs = await pool.query(
         `SELECT lr.id, lr.user_id 
          FROM license_requests lr
@@ -430,7 +433,6 @@ app.post('/api/subscriptions', authenticateToken, async (req, res) => {
       );
 
       if (pendingReqs.rowCount > 0) {
-        // 2. Loop through and fulfill each approved request instantly
         for (let req of pendingReqs.rows) {
           await pool.query(
             `INSERT INTO active_subscriptions 
@@ -439,12 +441,10 @@ app.post('/api/subscriptions', authenticateToken, async (req, res) => {
             [system_id, department_id || 1, req.user_id, monthly_cost || 0, associated_project || 'Automated CRM Fulfillment']
           );
 
-          // 3. Mark request as fulfilled
           await pool.query(`UPDATE license_requests SET status = 'Fulfilled' WHERE id = $1`, [req.id]);
           fulfilledUsers.push(req.user_id);
         }
       } else {
-        // 3. If no pending requests, just log it as an unassigned pool license
         await pool.query(
           `INSERT INTO active_subscriptions 
            (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked) 
@@ -675,7 +675,6 @@ app.put('/api/requests/:id/vetting', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const { alignment_score, ea_status, ea_comments } = req.body;
 
-  // RBAC: Added CRMHead to match the frontend Action Inbox permissions
   if (!['SuperAdmin', 'EA', 'DepartmentHead', 'CRMHead'].includes(req.user.role)) {
     return res.status(403).json({ error: "Access Denied: You do not have vetting clearance." });
   }

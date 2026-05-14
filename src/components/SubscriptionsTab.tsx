@@ -44,8 +44,31 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
   useEffect(() => {
-    fetch(`${API_URL}/api/systems`).then(res => res.json()).then(setAvailableSystems);
-    fetch(`${API_URL}/api/users`).then(res => res.json()).then(setAvailableUsers);
+    // SECURITY FIX: Attach the JWT token to the dropdown fetches
+    const token = localStorage.getItem('appManagerToken');
+    const headers = { 'Authorization': `Bearer ${token}` };
+
+    fetch(`${API_URL}/api/systems`, { headers })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch');
+        return res.json();
+      })
+      .then(data => setAvailableSystems(Array.isArray(data) ? data : []))
+      .catch(err => {
+        console.error("Failed to fetch systems:", err);
+        setAvailableSystems([]);
+      });
+
+    fetch(`${API_URL}/api/users`, { headers })
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to fetch');
+        return res.json();
+      })
+      .then(data => setAvailableUsers(Array.isArray(data) ? data : []))
+      .catch(err => {
+        console.error("Failed to fetch users:", err);
+        setAvailableUsers([]);
+      });
   }, []);
 
   useEffect(() => {
@@ -65,14 +88,18 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
     setIsSubmitting(true);
 
     try {
+      const token = localStorage.getItem('appManagerToken');
       const res = await fetch(`${API_URL}/api/subscriptions`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}` // SECURITY FIX
+        },
         body: JSON.stringify({ 
-          app_id: parseInt(selectedAppId), 
-          user_id: parseInt(selectedUserId), 
-          price: parseFloat(price),
-          owning_dept: owningDept
+          system_id: parseInt(selectedAppId), 
+          assigned_user_id: selectedUserId ? parseInt(selectedUserId) : null, 
+          monthly_cost: parseFloat(price),
+          department_id: null // Fallback if using dynamic dept selection
         })
       });
       const data = await res.json();
@@ -99,7 +126,11 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
 
   const handleRevoke = async (id: number) => {
     if(confirm("Are you sure you want to revoke this license? It will be returned to the Department's unassigned pool.")) {
-      await fetch(`${API_URL}/api/subscriptions/${id}`, { method: 'DELETE' });
+      const token = localStorage.getItem('appManagerToken');
+      await fetch(`${API_URL}/api/subscriptions/${id}`, { 
+        method: 'DELETE',
+        headers: { 'Authorization': `Bearer ${token}` } // SECURITY FIX
+      });
       onAddSubscription();
     }
   }
@@ -113,8 +144,11 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
     }, 1500);
   }
 
+  // HARDENED: Guarantee safeUsers is an array before processing
+  const safeUsers = Array.isArray(availableUsers) && availableUsers.length > 0 ? availableUsers : [{ id: 0, email: 'Unassigned', department: 'None' }];
+  
   const enrichedSubs = subscriptions.map((sub, index) => {
-    const user = availableUsers.find(u => u.id === sub.user_id) || availableUsers[index % availableUsers.length] || { id: 0, email: 'Unassigned', department: 'None' };
+    const user = safeUsers.find(u => u.id === sub.assigned_user_id) || safeUsers[index % safeUsers.length] || { id: 0, email: 'Unassigned', department: 'None' };
     
     const mockDaysAgo = user.id === 0 ? 0 : (user.id + (sub.id || index) * 7) % 45;
     const isIdle = user.id !== 0 && mockDaysAgo > 30;
@@ -137,7 +171,6 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
     return acc;
   }, {} as Record<string, DeptPool>);
 
-  // THE FIX: Explicitly forcing the output to be an array of DeptPool so VS Code stops complaining
   const deptArray: DeptPool[] = (Object.values(departmentPools) as DeptPool[]).sort((a, b) => b.spend - a.spend);
 
   return (
