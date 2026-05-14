@@ -1,5 +1,6 @@
 import { useState, useEffect } from "react";
 import { CIODashboard } from "@/components/CIODashboard";
+import { DepartmentDashboard } from "@/components/DepartmentDashboard";
 import { AppsDashboard } from "@/components/AppsDashboard";
 import { PMODashboard } from "@/components/PMODashboard";
 import { CRMDashboard } from "@/components/CRMDashboard"; 
@@ -380,6 +381,9 @@ const Index = () => {
             onNavigateToRecommendations={() => setActiveTab('recommendations')}
           />
         );
+
+      case 'DepartmentHead': 
+      return <DepartmentDashboard/>;
       
       case 'ApplicationsHead':
         return <AppsDashboard systems={systems} />;
