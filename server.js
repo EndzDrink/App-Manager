@@ -688,6 +688,29 @@ app.post('/api/requests', authenticateToken, async (req, res) => {
   }
 });
 
+// CRM Escalation Endpoint
+app.put('/api/requests/:id/escalate', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const cleanId = id.replace('REQ-', '');
+
+  if (!['SuperAdmin', 'CRMHead'].includes(req.user.role)) {
+    return res.status(403).json({ error: "Access Denied: Only CRM can escalate to EA." });
+  }
+
+  try {
+    // Update the pipeline: CRM is done, EA is now up.
+    await pool.query(
+      `UPDATE license_requests 
+       SET crm_status = 'Escalated to EA', ea_status = 'Awaiting EA Vetting' 
+       WHERE id = $1`,
+      [cleanId]
+    );
+    res.json({ success: true, message: "Request successfully escalated to Enterprise Architecture." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get('/api/requests/me', authenticateToken, async (req, res) => {
   const userId = req.user.id || 1; 
   try {

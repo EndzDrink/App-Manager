@@ -8,14 +8,15 @@ import {
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+// FIXED: Updated interface to match the new backend schema
 interface EARequest {
-  id: number;
+  id: string; // Now a string because backend returns "REQ-12"
   system: string;
   requester: string;
   dept: string;
   score: number;
-  status: string;
-  timeInStage: string;
+  ea_status: string; // Changed from 'status'
+  created_at: string; // Changed from 'timeInStage' to match backend
 }
 
 export const EAStrategyTab = () => {
@@ -34,9 +35,9 @@ export const EAStrategyTab = () => {
       });
       if (res.ok) {
         const data = await res.json();
-        // Filter specifically for EA status
+        // FIXED: Filter specifically for ea_status
         if (Array.isArray(data)) {
-          setRequests(data.filter((r: EARequest) => r.status === 'Awaiting EA Vetting'));
+          setRequests(data.filter((r: EARequest) => r.ea_status === 'Awaiting EA Vetting'));
         }
       }
     } catch (err) {
@@ -61,6 +62,7 @@ export const EAStrategyTab = () => {
     
     try {
       const token = localStorage.getItem('appManagerToken');
+      // The backend strips the "REQ-" prefix automatically, so we can just pass the ID
       const res = await fetch(`${API_URL}/api/requests/${selectedRequest.id}/vetting`, {
         method: 'PUT',
         headers: { 
@@ -152,13 +154,14 @@ export const EAStrategyTab = () => {
                 >
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-[9px] text-gray-400 font-bold mb-0.5 uppercase tracking-wider">REQ-{req.id}</p>
+                      {/* FIXED: Backend already prepends 'REQ-', so we just print req.id */}
+                      <p className="text-[9px] text-gray-400 font-bold mb-0.5 uppercase tracking-wider">{req.id}</p>
                       <p className="font-bold text-blue-900 text-sm">{req.system || "New System Request"}</p>
                       <p className="text-xs text-gray-500 mt-1">Requested by: <span className="font-medium text-gray-700">{req.requester}</span></p>
                     </div>
                     <div className="flex flex-col items-end gap-2">
                       <span className="text-[9px] font-bold bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded uppercase border border-yellow-200">Pending EA</span>
-                      <span className="text-[10px] text-gray-400 font-medium">{req.timeInStage || 'Just logged'}</span>
+                      <span className="text-[10px] text-gray-400 font-medium">{new Date(req.created_at).toLocaleDateString()}</span>
                     </div>
                   </div>
                 </div>
@@ -186,7 +189,7 @@ export const EAStrategyTab = () => {
                   <input 
                     type="range" min="0" max="100" value={score} 
                     onChange={(e) => setScore(parseInt(e.target.value))}
-                    className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${score > 70 ? 'accent-green-600 bg-green-100' : score > 40 ? 'accent-orange-500 bg-orange-100' : 'accent-red-600 bg-red-100'}`}
+                    className={`w-full h-2 rounded-lg appearance-none cursor-pointer ${score > 70 ? 'accent-green-600 bg-bg-green-100' : score > 40 ? 'accent-orange-500 bg-orange-100' : 'accent-red-600 bg-red-100'}`}
                   />
                   <div className="flex justify-between text-[10px] font-bold text-gray-400 mt-2 uppercase">
                     <span>Legacy / High Debt</span>

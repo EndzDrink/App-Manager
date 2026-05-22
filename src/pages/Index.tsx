@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import type { ElementType } from "react";
 import { CIODashboard } from "@/components/CIODashboard";
+import { StaffDashboard } from "@/components/StaffDashboard";
 import { DepartmentDashboard } from "@/components/DepartmentDashboard";
 import { AppsDashboard } from "@/components/AppsDashboard";
 import { PMODashboard } from "@/components/PMODashboard";
@@ -80,6 +81,7 @@ interface Subscription {
 
 interface User {
   id?: number;
+  email?: string;
   department?: string;
   assigned_systems?: { name: string; price: number }[];
 }
@@ -139,7 +141,8 @@ const escapeCsv = (value: unknown): string => {
 // 4. RBAC NAVIGATION MATRIX
 // ------------------------------------------------------------------
 const NAV_ITEMS: NavItem[] = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
+  // FIXED: Added StandardUser to the roles array for Dashboard
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead', 'StandardUser'] },
   { id: 'systems', label: 'Enterprise Catalog', icon: Server, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin', 'EA', 'CIO', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
   { id: 'subscriptions', label: 'Subscriptions', icon: CreditCard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead'] },
   { id: 'users', label: 'Identity Matrix', icon: Users, roles: ['SuperAdmin', 'EA', 'DepartmentHead'] },
@@ -168,7 +171,8 @@ const Index = () => {
   });
 
   // --- UI State ---
-  const [activeTab, setActiveTab] = useState(role === 'StandardUser' ? 'systems' : 'dashboard');
+  // FIXED: activeTab defaults to dashboard for everyone now
+  const [activeTab, setActiveTab] = useState('dashboard');
   const [isLiveMode, setIsLiveMode] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isArchiveOpen, setIsArchiveOpen] = useState(false);
@@ -308,7 +312,7 @@ const Index = () => {
     setRole(parseRole(newRole));
     if (deptId) setUserDepartmentId(deptId);
 
-    setActiveTab(newRole === 'StandardUser' ? 'systems' : 'dashboard');
+    setActiveTab('dashboard'); // Enforce everyone lands on the dashboard
   }, []);
 
   const fetchWithAuth = async (endpoint: string, options: RequestInit = {}) => {
@@ -574,7 +578,6 @@ const Index = () => {
       case 'SuperAdmin':
       case 'EA':
       case 'CIO':
-      case 'DepartmentHead':
         return (
           <CIODashboard
             systems={systems}
@@ -592,33 +595,26 @@ const Index = () => {
           />
         );
 
-      case 'ApplicationsHead':
-        return <AppsDashboard systems={systems} />;
-
-      case 'PMOLead':
-        return <PMODashboard />;
-
-      case 'CRMHead':
-        return <CRMDashboard />;
-
-      case 'NetworksHead':
-        return <NetworksDashboard systems={systems} />;
-
-      case 'StandardUser':
-      default:
-        return (
-          <div className="animate-in fade-in duration-500 pb-12">
-            <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm flex flex-col justify-center items-center text-center min-h-[450px] w-full">
-              <h3 className="font-semibold text-gray-900 mb-2">Need a new Enterprise System?</h3>
-              <p className="text-sm text-gray-500 mb-4">Check the Systems tab to access the CRM Demand Tracker, or request a custom build.</p>
-              <Button onClick={() => setActiveTab('systems')} className="px-4 py-2 bg-blue-900 text-yellow-400 font-bold hover:bg-blue-800 transition-colors">
-                Access Procurement
-              </Button>
-            </div>
-          </div>
-        );
-    }
-  };
+        case 'DepartmentHead':
+          return <DepartmentDashboard />;
+  
+        case 'ApplicationsHead':
+          return <AppsDashboard systems={systems} />;
+  
+        case 'PMOLead':
+          return <PMODashboard />;
+  
+        case 'CRMHead':
+          return <CRMDashboard />;
+  
+        case 'NetworksHead':
+          return <NetworksDashboard systems={systems} />;
+  
+        case 'StandardUser':
+        default:
+          return <StaffDashboard />;
+      }
+    };
 
   const renderTabContent = () => {
     if (selectedDeptId && deptDetails) {
