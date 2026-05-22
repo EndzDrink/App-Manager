@@ -41,7 +41,7 @@ const initializeSystems = async () => {
     await pool.query(`CREATE TABLE IF NOT EXISTS settings (id SERIAL PRIMARY KEY, monthly_budget DECIMAL DEFAULT 150000.00)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS data_connectors (id SERIAL PRIMARY KEY)`);
 
-    // 2. Systems Catalog
+    // 2. Systems Catalog (Updated for CRM & EA Needs)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS enterprise_systems (
         id SERIAL PRIMARY KEY,
@@ -51,9 +51,22 @@ const initializeSystems = async () => {
         deployment_architecture VARCHAR(50) DEFAULT 'Cloud',
         deployment_type VARCHAR(50) DEFAULT 'External SaaS',
         lifecycle_status VARCHAR(50) DEFAULT 'Standard',
+        capabilities JSONB DEFAULT '[]',
+        monthly_cost_per_seat DECIMAL DEFAULT 0.00,
+        satisfaction_score INTEGER DEFAULT 0,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    // Alter table to add new columns if they don't exist
+    const systemColumns = [
+      { name: 'capabilities', type: "JSONB DEFAULT '[]'" },
+      { name: 'monthly_cost_per_seat', type: 'DECIMAL DEFAULT 0.00' },
+      { name: 'satisfaction_score', type: 'INTEGER DEFAULT 0' }
+    ];
+    for (const col of systemColumns) {
+      await pool.query(`ALTER TABLE enterprise_systems ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
+    }
 
     // 3. Departments
     await pool.query(`
@@ -78,19 +91,39 @@ const initializeSystems = async () => {
       );
     `);
 
-    // 5. CRM Requests (HARDENED WITH CASCADE)
+    // 5. CRM & EA Requests (HARDENED WITH CASCADE & NEW FIELDS)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS license_requests (
         id SERIAL PRIMARY KEY,
         user_id INTEGER REFERENCES admin_users(id) ON DELETE CASCADE,
         system_id INTEGER REFERENCES enterprise_systems(id) ON DELETE CASCADE,
         status VARCHAR(50) DEFAULT 'Pending',
-        ea_status VARCHAR(50) DEFAULT 'Awaiting EA Vetting',
+        crm_status VARCHAR(50) DEFAULT 'pending',
+        ea_status VARCHAR(50) DEFAULT 'pending',
+        crm_deflection_score INTEGER DEFAULT NULL,
         alignment_score INTEGER DEFAULT 0,
         ea_comments TEXT,
+        category VARCHAR(100),
+        required_capabilities JSONB DEFAULT '[]',
+        estimated_users INTEGER DEFAULT 1,
+        estimated_cost_annual DECIMAL DEFAULT 0.00,
+        justification TEXT,
         request_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+
+    const reqColumns = [
+      { name: 'crm_status', type: "VARCHAR(50) DEFAULT 'pending'" },
+      { name: 'crm_deflection_score', type: 'INTEGER DEFAULT NULL' },
+      { name: 'category', type: 'VARCHAR(100)' },
+      { name: 'required_capabilities', type: "JSONB DEFAULT '[]'" },
+      { name: 'estimated_users', type: 'INTEGER DEFAULT 1' },
+      { name: 'estimated_cost_annual', type: 'DECIMAL DEFAULT 0.00' },
+      { name: 'justification', type: 'TEXT' }
+    ];
+    for (const col of reqColumns) {
+      await pool.query(`ALTER TABLE license_requests ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
+    }
 
     // 6. PMO Projects
     await pool.query(`
@@ -133,7 +166,7 @@ const initializeSystems = async () => {
     await pool.query(`INSERT INTO admin_users (email, password_hash, role) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING`, ['admin@organization.com', hashedPassword, 'SuperAdmin']);
     await pool.query(`INSERT INTO settings (id, monthly_budget) VALUES (1, 150000.00) ON CONFLICT (id) DO NOTHING`);
 
-    console.log("✅ Database Schema Verified & Hardened with Cascading Constraints.");
+    console.log("✅ Database Schema Verified & Hardened with SEAM Constraints.");
   } catch (err) { 
     console.error("❌ DB Initialization failed:", err.message); 
   }
@@ -145,14 +178,12 @@ const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.split(' ')[1];
   
-  // If there is no token, immediately throw 401 so the frontend interceptor catches it
   if (!token || token === 'null') {
     return res.status(401).json({ error: "Access Denied: No token provided." });
   }
 
   jwt.verify(token, JWT_SECRET, (err, user) => {
     if (err) {
-      // If token is expired/invalid, immediately throw 401 so frontend kicks to login
       return res.status(401).json({ error: "Session Expired or Invalid Token." });
     }
     req.user = user;
@@ -298,18 +329,33 @@ app.get('/api/metrics/usage/category', authenticateToken, async (req, res) => {
 // --- 7. CATALOG, IDENTITY & SUBSCRIPTIONS ---
 app.get('/api/systems', authenticateToken, async (req, res) => {
   try {
-    const r = await pool.query(`
-      SELECT s.id, s.name, s.functional_category as category, s.vendor, s.deployment_architecture as architecture, s.created_at,
-      s.deployment_type, s.lifecycle_status,
-      (SELECT COUNT(*) FROM active_subscriptions sub WHERE sub.system_id = s.id AND sub.is_revoked IS NOT TRUE) as active_seats
-      FROM enterprise_systems s ORDER BY s.name ASC
-    `);
+    const includeCapabilities = req.query.includeCapabilities === 'true';
+    
+    let selectFields = `
+      'SYS-' || s.id::text as id, 
+      s.name, 
+      s.vendor, 
+      s.functional_category as category, 
+      (SELECT COUNT(*) FROM active_subscriptions sub WHERE sub.system_id = s.id AND sub.is_revoked IS NOT TRUE) as active_users,
+      s.monthly_cost_per_seat,
+      s.satisfaction_score
+    `;
+
+    // Only include capabilities array and architecture info if requested or mapping everything
+    if (includeCapabilities) {
+      selectFields += `, s.capabilities`;
+    } else {
+       // Append legacy fields for existing UI components
+       selectFields += `, s.deployment_architecture as architecture, s.created_at, s.deployment_type, s.lifecycle_status`;
+    }
+
+    const r = await pool.query(`SELECT ${selectFields} FROM enterprise_systems s ORDER BY s.name ASC`);
     res.json(r.rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/systems', authenticateToken, async (req, res) => {
-  const { name, vendor, functional_category, deployment_architecture, deployment_type } = req.body;
+  const { name, vendor, functional_category, deployment_architecture, deployment_type, capabilities, monthly_cost_per_seat } = req.body;
   if (!name || !functional_category) {
     return res.status(400).json({ error: "System name and category are required." });
   }
@@ -317,14 +363,16 @@ app.post('/api/systems', authenticateToken, async (req, res) => {
   try {
     const result = await pool.query(
       `INSERT INTO enterprise_systems 
-       (name, vendor, functional_category, deployment_architecture, deployment_type) 
-       VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+       (name, vendor, functional_category, deployment_architecture, deployment_type, capabilities, monthly_cost_per_seat) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
       [
         name, 
         vendor || 'Unknown Vendor', 
         functional_category, 
         deployment_architecture || 'Cloud', 
-        deployment_type || 'External SaaS'
+        deployment_type || 'External SaaS',
+        JSON.stringify(capabilities || []),
+        monthly_cost_per_seat || 0.00
       ]
     );
     res.json({ success: true, system: result.rows[0] });
@@ -371,7 +419,6 @@ app.get('/api/users', authenticateToken, async (req, res) => {
   }
 });
 
-// --- FETCH ALL ACTIVE SUBSCRIPTIONS ---
 app.get('/api/subscriptions', authenticateToken, async (req, res) => {
   try {
     let query = `
@@ -464,7 +511,6 @@ app.post('/api/subscriptions', authenticateToken, async (req, res) => {
 
   } catch (err) { 
     await pool.query('ROLLBACK');
-    console.error("❌ Procurement & Auto-Fulfillment Failed:", err.message);
     res.status(500).json({ error: err.message }); 
   }
 });
@@ -615,15 +661,28 @@ app.post('/api/pmo/escalate', authenticateToken, async (req, res) => {
 });
 
 app.post('/api/requests', authenticateToken, async (req, res) => {
-  const { system_id } = req.body;
+  const { system_id, category, required_capabilities, estimated_users, estimated_cost_annual, justification } = req.body;
   const userId = req.user.id || 1; 
 
   try {
     const result = await pool.query(
-      'INSERT INTO license_requests (user_id, system_id, status, ea_status, request_date) VALUES ($1, $2, $3, $4, CURRENT_TIMESTAMP) RETURNING id',
-      [userId, system_id, 'Pending', 'Awaiting EA Vetting']
+      `INSERT INTO license_requests 
+       (user_id, system_id, status, crm_status, ea_status, category, required_capabilities, estimated_users, estimated_cost_annual, justification, request_date) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP) RETURNING id`,
+      [
+        userId, 
+        system_id, 
+        'Pending', 
+        'pending', 
+        'pending', 
+        category || 'Uncategorized', 
+        JSON.stringify(required_capabilities || []), 
+        estimated_users || 1, 
+        estimated_cost_annual || 0.00, 
+        justification || ''
+      ]
     );
-    res.json({ success: true, message: "Request queued for EA vetting." });
+    res.json({ success: true, message: "Request queued for CRM vetting.", id: `REQ-${result.rows[0].id}` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -633,7 +692,7 @@ app.get('/api/requests/me', authenticateToken, async (req, res) => {
   const userId = req.user.id || 1; 
   try {
     const r = await pool.query(`
-      SELECT lr.id, es.name as system_name, lr.status, lr.ea_status, lr.alignment_score, lr.ea_comments, lr.request_date
+      SELECT 'REQ-' || lr.id::text as id, es.name as system_name, lr.status, lr.ea_status, lr.alignment_score, lr.ea_comments, lr.request_date
       FROM license_requests lr
       JOIN enterprise_systems es ON lr.system_id = es.id
       WHERE lr.user_id = $1
@@ -645,15 +704,28 @@ app.get('/api/requests/me', authenticateToken, async (req, res) => {
   }
 });
 
+// UPDATED TO MATCH REQUIRED SEAM ARCHITECTURE SCHEMA
 app.get('/api/requests', authenticateToken, async (req, res) => {
   try {
     let query = `
-      SELECT lr.id, es.name as system, au.email as requester, 'Department' as dept, 
-             lr.ea_status as status, lr.alignment_score as score, lr.request_date,
-             EXTRACT(DAY FROM CURRENT_TIMESTAMP - lr.request_date)::text || ' Days' as timeInStage
+      SELECT 
+        'REQ-' || lr.id::text as id, 
+        es.name as system, 
+        au.email as requester, 
+        COALESCE(d.name, 'Unassigned') as dept, 
+        COALESCE(lr.category, es.functional_category) as category,
+        lr.required_capabilities,
+        lr.estimated_users,
+        lr.estimated_cost_annual,
+        lr.justification,
+        lr.crm_status,
+        lr.crm_deflection_score,
+        lr.ea_status,
+        TO_CHAR(lr.request_date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at
       FROM license_requests lr
       JOIN enterprise_systems es ON lr.system_id = es.id
       LEFT JOIN admin_users au ON lr.user_id = au.id
+      LEFT JOIN departments d ON au.department_id = d.id
     `;
     let params = [];
     
@@ -673,21 +745,34 @@ app.get('/api/requests', authenticateToken, async (req, res) => {
 
 app.put('/api/requests/:id/vetting', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { alignment_score, ea_status, ea_comments } = req.body;
+  const cleanId = id.replace('REQ-', '');
+  const { alignment_score, ea_status, ea_comments, crm_status, crm_deflection_score } = req.body;
 
   if (!['SuperAdmin', 'EA', 'DepartmentHead', 'CRMHead'].includes(req.user.role)) {
     return res.status(403).json({ error: "Access Denied: You do not have vetting clearance." });
   }
 
   try {
-    await pool.query(
-      `UPDATE license_requests 
-       SET alignment_score = $1, ea_status = $2, ea_comments = $3, status = $4
-       WHERE id = $5`,
-      [alignment_score, ea_status, ea_comments, ea_status === 'Vetoed' ? 'Rejected' : 'Pending', id]
-    );
+    let updateFields = [];
+    let params = [];
+    let paramIndex = 1;
 
-    res.json({ success: true, message: `Request successfully ${ea_status}.` });
+    if (alignment_score !== undefined) { updateFields.push(`alignment_score = $${paramIndex++}`); params.push(alignment_score); }
+    if (ea_status !== undefined) { 
+      updateFields.push(`ea_status = $${paramIndex++}`); params.push(ea_status); 
+      updateFields.push(`status = $${paramIndex++}`); params.push(ea_status === 'Vetoed' ? 'Rejected' : 'Pending');
+    }
+    if (ea_comments !== undefined) { updateFields.push(`ea_comments = $${paramIndex++}`); params.push(ea_comments); }
+    if (crm_status !== undefined) { updateFields.push(`crm_status = $${paramIndex++}`); params.push(crm_status); }
+    if (crm_deflection_score !== undefined) { updateFields.push(`crm_deflection_score = $${paramIndex++}`); params.push(crm_deflection_score); }
+
+    if (updateFields.length === 0) return res.status(400).json({ error: "No valid update fields provided." });
+
+    params.push(cleanId);
+    const query = `UPDATE license_requests SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`;
+    
+    await pool.query(query, params);
+    res.json({ success: true, message: `Request successfully updated.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

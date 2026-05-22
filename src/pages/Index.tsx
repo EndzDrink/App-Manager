@@ -1,9 +1,10 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import type { ElementType } from "react";
 import { CIODashboard } from "@/components/CIODashboard";
 import { DepartmentDashboard } from "@/components/DepartmentDashboard";
 import { AppsDashboard } from "@/components/AppsDashboard";
 import { PMODashboard } from "@/components/PMODashboard";
-import { CRMDashboard } from "@/components/CRMDashboard"; 
+import { CRMDashboard } from "@/components/CRMDashboard";
 import { NetworksDashboard } from "@/components/NetworksDashboard";
 
 import { AdminTab } from "@/components/AdminTab";
@@ -13,95 +14,302 @@ import { RecommendationsTab } from "@/components/RecommendationsTab";
 import { UsersTab } from "@/components/UsersTab";
 import { AuditTab } from "@/components/AuditTab";
 import { DepartmentDetailTab } from "@/components/DepartmentDetailTab";
-import { EAStrategyTab } from "@/components/EAStrategyTab"; 
+import { EAStrategyTab } from "@/components/EAStrategyTab";
 import { Login } from "@/components/Login";
-import Footer from "@/components/Footer"; 
+import Footer from "@/components/Footer";
 import { Button } from "@/components/ui/button";
-import { 
-  CreditCard, Lightbulb, Lock, Server, Filter, X, 
-  Monitor, ShieldAlert, Shield, LogOut, Download, RefreshCw, 
+import {
+  CreditCard, Lightbulb, Lock, Server, Filter, X,
+  Monitor, ShieldAlert, Shield, LogOut, Download, RefreshCw,
   LayoutDashboard, Users, ShieldCheck, Settings, Menu, Archive, FileText, Fingerprint
 } from "lucide-react";
 
+// ------------------------------------------------------------------
+// 1. ENV & CONSTANTS
+// ------------------------------------------------------------------
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
+const MUNICIPAL_UNITS = [
+  "Information Management Unit (IMU)",
+  "Water & Sanitation Unit",
+  "Metro Police Unit",
+  "Parks & Recreation Unit"
+] as const;
+
+const IMU_DEPARTMENTS = [
+  "Enterprise Architecture",
+  "Applications/Dev",
+  "Networks",
+  "PMO",
+  "Security",
+  "GIS",
+  "Admin",
+  "Customer Service"
+] as const;
+
+// ------------------------------------------------------------------
+// 2. TYPES
+// ------------------------------------------------------------------
+type AppRole =
+  | 'SuperAdmin'
+  | 'EA'
+  | 'CIO'
+  | 'DepartmentHead'
+  | 'PMOLead'
+  | 'ApplicationsHead'
+  | 'NetworksHead'
+  | 'CRMHead'
+  | 'StandardUser';
+
+interface System {
+  id: number;
+  name: string;
+  category: string;
+  created_at?: string;
+  departments?: string[];
+}
+
+interface Subscription {
+  id: number;
+  name: string;
+  category: string;
+  price: string | number;
+  department_id?: number;
+  project_name?: string;
+}
+
+interface User {
+  id?: number;
+  department?: string;
+  assigned_systems?: { name: string; price: number }[];
+}
+
+interface Recommendation {
+  title: string;
+  [key: string]: unknown;
+}
+
+interface SavedReport {
+  id: number;
+  filename: string;
+  date: string;
+  content: string;
+}
+
+interface Connector {
+  id?: number;
+  [key: string]: unknown;
+}
+
+interface NavItem {
+  id: string;
+  label: string;
+  icon: ElementType;
+  roles: AppRole[];
+}
+
+// ------------------------------------------------------------------
+// 3. PURE UTILITIES
+// ------------------------------------------------------------------
+const getUnitForDept = (deptName: string): string => {
+  if (!deptName || deptName === 'Unassigned') return "Other";
+  if (IMU_DEPARTMENTS.includes(deptName as typeof IMU_DEPARTMENTS[number])) return "Information Management Unit (IMU)";
+  const lower = deptName.toLowerCase();
+  if (lower.includes("water") || lower.includes("sanitation")) return "Water & Sanitation Unit";
+  if (lower.includes("police")) return "Metro Police Unit";
+  if (lower.includes("park") || lower.includes("recreation")) return "Parks & Recreation Unit";
+  return "Other";
+};
+
+const parseRole = (raw: string | null): AppRole => {
+  const valid: AppRole[] = [
+    'SuperAdmin', 'EA', 'CIO', 'DepartmentHead',
+    'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead', 'StandardUser'
+  ];
+  return valid.includes(raw as AppRole) ? (raw as AppRole) : 'StandardUser';
+};
+
+const escapeCsv = (value: unknown): string => {
+  const str = String(value ?? '');
+  if (/[",\n]/.test(str)) return `"${str.replace(/"/g, '""')}"`;
+  return str;
+};
+
+// ------------------------------------------------------------------
+// 4. RBAC NAVIGATION MATRIX
+// ------------------------------------------------------------------
+const NAV_ITEMS: NavItem[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
+  { id: 'systems', label: 'Enterprise Catalog', icon: Server, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin', 'EA', 'CIO', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
+  { id: 'subscriptions', label: 'Subscriptions', icon: CreditCard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead'] },
+  { id: 'users', label: 'Identity Matrix', icon: Users, roles: ['SuperAdmin', 'EA', 'DepartmentHead'] },
+  { id: 'recommendations', label: 'Recommendations', icon: Lightbulb, roles: ['SuperAdmin', 'CIO'] },
+  { id: 'audit', label: 'Audit & Compliance', icon: ShieldCheck, roles: ['SuperAdmin', 'EA'] },
+  { id: 'ea-strategy', label: 'EA Strategy', icon: Fingerprint, roles: ['SuperAdmin', 'EA'] },
+  { id: 'admin', label: 'Settings', icon: Settings, roles: ['SuperAdmin'] }
+];
+
+const SUBSCRIPTION_ROLES: AppRole[] = ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead'];
+const AUDIT_ROLES: AppRole[] = ['SuperAdmin', 'EA'];
+const RECOMMENDATION_ROLES: AppRole[] = ['SuperAdmin', 'CIO'];
+const USER_ROLES: AppRole[] = ['SuperAdmin', 'EA', 'DepartmentHead'];
+const EA_STRATEGY_ROLES: AppRole[] = ['SuperAdmin', 'EA'];
+
+// ------------------------------------------------------------------
+// 5. COMPONENT
+// ------------------------------------------------------------------
 const Index = () => {
-  const [token, setToken] = useState<string | null>(localStorage.getItem('appManagerToken'));
-  const [role, setRole] = useState<string>(localStorage.getItem('appManagerRole') || 'StandardUser');
-  
-  const [userDepartmentId, setUserDepartmentId] = useState<number | null>(
-    localStorage.getItem('appManagerDeptId') ? parseInt(localStorage.getItem('appManagerDeptId')!) : null
+  // --- Auth State (lazy init) ---
+  const [token, setToken] = useState<string | null>(() => localStorage.getItem('appManagerToken'));
+  const [role, setRole] = useState<AppRole>(() => parseRole(localStorage.getItem('appManagerRole')));
+  const [userDepartmentId, setUserDepartmentId] = useState<number | null>(() => {
+    const raw = localStorage.getItem('appManagerDeptId');
+    return raw ? parseInt(raw, 10) : null;
+  });
+
+  // --- UI State ---
+  const [activeTab, setActiveTab] = useState(role === 'StandardUser' ? 'systems' : 'dashboard');
+  const [isLiveMode, setIsLiveMode] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isArchiveOpen, setIsArchiveOpen] = useState(false);
+
+  // --- Data State ---
+  const [savedReports, setSavedReports] = useState<SavedReport[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem('ea_saved_reports') || '[]');
+    } catch {
+      return [];
+    }
+  });
+
+  const [systems, setSystems] = useState<System[]>([]);
+  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
+  const [connectors, setConnectors] = useState<Connector[]>([]);
+  const [users, setUsers] = useState<User[]>([]);
+  const [duplications, setDuplications] = useState<unknown[]>([]);
+  const [deptSpend, setDeptSpend] = useState<unknown[]>([]);
+  const [trends, setTrends] = useState<unknown>(null);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [monthlyCost, setMonthlyCost] = useState<number>(0);
+  const [budget, setBudget] = useState<number>(150000);
+  const [isLoading, setIsLoading] = useState(true);
+
+  // --- Drill-down State ---
+  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
+  const [deptDetails, setDeptDetails] = useState<unknown>(null);
+
+  // --- BI Filters ---
+  const [biSystemFilter, setBiSystemFilter] = useState<string>("All");
+  const [biUnitFilter, setBiUnitFilter] = useState<string>("All");
+  const [biDeptFilter, setBiDeptFilter] = useState<string>("All");
+
+  // ----------------------------------------------------------------
+  // 6. MEMOIZED DERIVATIONS
+  // ----------------------------------------------------------------
+  const visibleNavItems = useMemo(() => NAV_ITEMS.filter(item => item.roles.includes(role)), [role]);
+
+  const allSystemNames = useMemo(
+    () => Array.from(new Set(systems.map(s => s.name).filter(Boolean))).sort() as string[],
+    [systems]
   );
 
-  const [activeTab, setActiveTab] = useState(role === 'StandardUser' ? 'systems' : 'dashboard');
-  const [isLiveMode, setIsLiveMode] = useState<boolean>(false);
-  
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(false);
-  const [isArchiveOpen, setIsArchiveOpen] = useState<boolean>(false);
-  const [savedReports, setSavedReports] = useState<any[]>(JSON.parse(localStorage.getItem('ea_saved_reports') || '[]'));
+  const allDeptNames = useMemo(
+    () => Array.from(new Set(users.map(u => u.department).filter((d): d is string => !!d && d !== 'Unassigned'))).sort(),
+    [users]
+  );
 
-  const [systems, setSystems] = useState<any[]>([]); 
-  const [subscriptions, setSubscriptions] = useState<any[]>([]);
-  const [connectors, setConnectors] = useState<any[]>([]);
-  const [users, setUsers] = useState<any[]>([]);
-  const [duplications, setDuplications] = useState<any[]>([]);
-  const [deptSpend, setDeptSpend] = useState<any[]>([]);
-  const [trends, setTrends] = useState<any>(null);
-  const [recommendations, setRecommendations] = useState<any[]>([]);
-  const [monthlyCost, setMonthlyCost] = useState<number>(0);
-  const [budget, setBudget] = useState<number>(150000); 
-  const [isLoading, setIsLoading] = useState<boolean>(true);
-  
-  const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
-  const [deptDetails, setDeptDetails] = useState<any>(null);
+  const availableSystems = useMemo(() => {
+    if (biUnitFilter === "All" && biDeptFilter === "All") return allSystemNames;
+    return allSystemNames.filter(sys =>
+      users.some(u => {
+        const matchUnit = biUnitFilter === "All" || getUnitForDept(u.department) === biUnitFilter;
+        const matchDept = biDeptFilter === "All" || u.department === biDeptFilter;
+        const hasSys = u.assigned_systems?.some(s => s.name === sys);
+        return matchUnit && matchDept && hasSys;
+      })
+    );
+  }, [allSystemNames, users, biUnitFilter, biDeptFilter]);
 
-  const [biSystemFilter, setBiSystemFilter] = useState<string>("All");
-  const [biUnitFilter, setBiUnitFilter] = useState<string>("All"); 
-  const [biDeptFilter, setBiDeptFilter] = useState<string>("All"); 
+  const availableUnits = useMemo(() => {
+    return MUNICIPAL_UNITS.filter(unit =>
+      users.some(u => {
+        const matchSys = biSystemFilter === "All" || u.assigned_systems?.some(s => s.name === biSystemFilter);
+        const matchDept = biDeptFilter === "All" || u.department === biDeptFilter;
+        const isUnit = getUnitForDept(u.department) === unit;
+        return matchSys && matchDept && isUnit;
+      })
+    );
+  }, [users, biSystemFilter, biDeptFilter]);
 
-  const handleLogout = () => {
+  const availableDepts = useMemo(() => {
+    return allDeptNames.filter(dept =>
+      users.some(u => {
+        const matchSys = biSystemFilter === "All" || u.assigned_systems?.some(s => s.name === biSystemFilter);
+        const matchUnit = biUnitFilter === "All" || getUnitForDept(u.department) === biUnitFilter;
+        const isDept = u.department === dept;
+        return matchSys && matchUnit && isDept;
+      })
+    );
+  }, [allDeptNames, users, biSystemFilter, biUnitFilter]);
+
+  const filteredSubscriptions = useMemo(() => {
+    return subscriptions.filter(sub => {
+      if (role === 'DepartmentHead' && sub.department_id !== userDepartmentId) return false;
+      if (biSystemFilter !== "All" && sub.name !== biSystemFilter) return false;
+      if (biUnitFilter !== "All" || biDeptFilter !== "All") {
+        const userForSub = users.find(u =>
+          u.assigned_systems?.some(s => s.name === sub.name && s.price === sub.price)
+        );
+        if (userForSub) {
+          if (biUnitFilter !== "All" && getUnitForDept(userForSub.department) !== biUnitFilter) return false;
+          if (biDeptFilter !== "All" && userForSub.department !== biDeptFilter) return false;
+        }
+      }
+      return true;
+    });
+  }, [subscriptions, role, userDepartmentId, biSystemFilter, biUnitFilter, biDeptFilter, users]);
+
+  const filteredMonthlyCost = useMemo(
+    () => filteredSubscriptions.reduce((sum, sub) => sum + parseFloat(String(sub.price || 0)), 0),
+    [filteredSubscriptions]
+  );
+
+  const filteredRecommendations = useMemo(
+    () => (biSystemFilter === "All" ? recommendations : recommendations.filter(rec => rec.title.includes(biSystemFilter))),
+    [recommendations, biSystemFilter]
+  );
+
+  const percentUsed = useMemo(() => (budget > 0 ? (filteredMonthlyCost / budget) * 100 : 0), [filteredMonthlyCost, budget]);
+
+  const costColor = useMemo(() => {
+    if (percentUsed >= 100) return "text-red-600";
+    if (percentUsed >= 80) return "text-orange-500";
+    return "text-green-600";
+  }, [percentUsed]);
+
+  // ----------------------------------------------------------------
+  // 7. HANDLERS
+  // ----------------------------------------------------------------
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('appManagerToken');
     localStorage.removeItem('appManagerRole');
     localStorage.removeItem('appManagerDeptId');
     setToken(null);
     setRole('StandardUser');
     setUserDepartmentId(null);
-  };
+  }, []);
 
-  const handleLoginSuccess = (newToken: string, newRole: string, deptId?: number) => {
+  const handleLoginSuccess = useCallback((newToken: string, newRole: string, deptId?: number) => {
     localStorage.setItem('appManagerToken', newToken);
     localStorage.setItem('appManagerRole', newRole);
     if (deptId) localStorage.setItem('appManagerDeptId', deptId.toString());
-    
+
     setToken(newToken);
-    setRole(newRole);
+    setRole(parseRole(newRole));
     if (deptId) setUserDepartmentId(deptId);
-    
-    // Auto-route based on blueprint
+
     setActiveTab(newRole === 'StandardUser' ? 'systems' : 'dashboard');
-  };
-
-  // --- FIXED ROLE ACCESSIBILITY MATRIX (RBAC) ---
-  const navItems = [
-    { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
-    { id: 'systems', label: 'Enterprise Catalog', icon: Server, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin', 'EA', 'CIO', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
-    { id: 'subscriptions', label: 'Subscriptions', icon: CreditCard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead'] },
-    { id: 'users', label: 'Identity Matrix', icon: Users, roles: ['SuperAdmin', 'EA', 'DepartmentHead'] },
-    { id: 'recommendations', label: 'Recommendations', icon: Lightbulb, roles: ['SuperAdmin', 'CIO'] },
-    { id: 'audit', label: 'Audit & Compliance', icon: ShieldCheck, roles: ['SuperAdmin', 'EA'] }, 
-    { id: 'ea-strategy', label: 'EA Strategy', icon: Fingerprint, roles: ['SuperAdmin', 'EA'] },
-    { id: 'admin', label: 'Settings', icon: Settings, roles: ['SuperAdmin'] } 
-  ];
-
-  const visibleNavItems = navItems.filter(item => item.roles.includes(role));
-
-  // Ensure users can't URL-hack into tabs they don't own
-  useEffect(() => {
-    if (visibleNavItems.length > 0 && !visibleNavItems.find(item => item.id === activeTab)) {
-      setActiveTab(visibleNavItems[0].id);
-      setSelectedDeptId(null);
-    }
-  }, [role, activeTab, visibleNavItems]);
+  }, []);
 
   const fetchWithAuth = async (endpoint: string, options: RequestInit = {}) => {
     const currentToken = localStorage.getItem('appManagerToken');
@@ -113,19 +321,76 @@ const Index = () => {
     return fetch(`${API_URL}${endpoint}`, { ...options, headers });
   };
 
-  const refreshAllData = async () => {
+  const fetchMonthlyCost = useCallback(async () => {
+    const res = await fetchWithAuth('/api/metrics/monthly-cost');
+    if (res.ok) {
+      const d = await res.json();
+      setMonthlyCost(d.total);
+    }
+  }, []);
+
+  const fetchSubscriptions = useCallback(async () => {
+    const res = await fetchWithAuth('/api/subscriptions');
+    if (res.ok) setSubscriptions(await res.json());
+  }, []);
+
+  const fetchSystems = useCallback(async () => {
+    const res = await fetchWithAuth('/api/systems');
+    if (res.ok) setSystems(await res.json());
+  }, []);
+
+  const fetchRecommendations = useCallback(async () => {
+    const res = await fetchWithAuth('/api/recommendations');
+    if (res.ok) setRecommendations(await res.json());
+  }, []);
+
+  const fetchSettings = useCallback(async () => {
+    const res = await fetchWithAuth('/api/settings');
+    if (res.ok) {
+      const d = await res.json();
+      setBudget(parseFloat(d.monthly_budget));
+    }
+  }, []);
+
+  const fetchConnectors = useCallback(async () => {
+    const res = await fetchWithAuth('/api/connectors');
+    if (res.ok) setConnectors(await res.json());
+  }, []);
+
+  const fetchUsers = useCallback(async () => {
+    const res = await fetchWithAuth('/api/users');
+    if (res.ok) setUsers(await res.json());
+  }, []);
+
+  const fetchTrends = useCallback(async () => {
+    const res = await fetchWithAuth('/api/metrics/trends');
+    if (res.ok) setTrends(await res.json());
+  }, []);
+
+  const fetchAuditData = useCallback(async (currentRole: AppRole) => {
+    if (['SuperAdmin', 'EA', 'DepartmentHead'].includes(currentRole)) {
+      const deptRes = await fetchWithAuth('/api/metrics/departmental-spend');
+      if (deptRes.ok) setDeptSpend(await deptRes.json());
+    }
+    if (['SuperAdmin', 'EA'].includes(currentRole)) {
+      const dupRes = await fetchWithAuth('/api/audit/duplication');
+      if (dupRes.ok) setDuplications(await dupRes.json());
+    }
+  }, []);
+
+  const refreshAllData = useCallback(async () => {
     if (!token) return;
     setIsLoading(true);
     try {
       await Promise.all([
-        fetchMonthlyCost(), 
-        fetchSubscriptions(), 
-        fetchSystems(), 
-        fetchRecommendations(), 
-        fetchSettings(), 
-        fetchConnectors(), 
-        fetchUsers(), 
-        fetchAuditData(), 
+        fetchMonthlyCost(),
+        fetchSubscriptions(),
+        fetchSystems(),
+        fetchRecommendations(),
+        fetchSettings(),
+        fetchConnectors(),
+        fetchUsers(),
+        fetchAuditData(role),
         fetchTrends()
       ]);
     } catch (error) {
@@ -133,205 +398,95 @@ const Index = () => {
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [token, role, fetchMonthlyCost, fetchSubscriptions, fetchSystems, fetchRecommendations, fetchSettings, fetchConnectors, fetchUsers, fetchAuditData, fetchTrends]);
 
-  const handleUpdateBudget = async (nb: number) => {
+  const handleUpdateBudget = useCallback(async (nb: number) => {
     await fetchWithAuth('/api/settings', { method: 'PUT', body: JSON.stringify({ monthly_budget: nb }) });
     setBudget(nb);
-  };
+  }, []);
 
-  const handleReclaim = async (id: number) => {
+  const handleReclaim = useCallback(async (id: number) => {
     if (role === 'StandardUser') return;
     const res = await fetchWithAuth(`/api/subscriptions/${id}`, { method: 'DELETE' });
     if (res.ok) refreshAllData();
-  };
+  }, [role, refreshAllData]);
 
-  const handleDepartmentClick = async (id: number) => {
+  const handleDepartmentClick = useCallback(async (id: number) => {
     const res = await fetchWithAuth(`/api/departments/${id}/details`);
     if (res.ok) {
       const details = await res.json();
       setDeptDetails(details);
       setSelectedDeptId(id);
     }
-  };
+  }, []);
 
-  const handleAddConnector = async (connectorData: any) => {
+  const handleAddConnector = useCallback(async (connectorData: unknown) => {
     try {
       await fetchWithAuth('/api/connectors', { method: 'POST', body: JSON.stringify(connectorData) });
-      refreshAllData(); 
+      refreshAllData();
     } catch (err) {
       console.error("Failed to save connector:", err);
     }
-  };
+  }, [refreshAllData]);
 
-  // --- FIXED: BYPASS REACT STATE FOR STRICT RBAC FETCHING ---
-  const fetchAuditData = async () => { 
-    // We strictly pull the role directly from LocalStorage to prevent Stale State Closures
-    const currentRole = localStorage.getItem('appManagerRole') || '';
-    
-    // 1. Department Spend is needed by EA, SuperAdmin, AND Department Heads
-    if (currentRole === 'SuperAdmin' || currentRole === 'EA' || currentRole === 'DepartmentHead') {
-      const deptRes = await fetchWithAuth('/api/metrics/departmental-spend');
-      if (deptRes.ok) setDeptSpend(await deptRes.json());
-    }
-
-    // 2. Global Duplication Audit is STRICTLY for EA and SuperAdmin
-    if (currentRole === 'SuperAdmin' || currentRole === 'EA') {
-      const dupRes = await fetchWithAuth('/api/audit/duplication');
-      if (dupRes.ok) setDuplications(await dupRes.json());
-    }
-  };
-
-  const fetchTrends = async () => { const res = await fetchWithAuth('/api/metrics/trends'); if (res.ok) setTrends(await res.json()); };
-  const fetchUsers = async () => { const res = await fetchWithAuth('/api/users'); if (res.ok) setUsers(await res.json()); };
-  const fetchConnectors = async () => { const res = await fetchWithAuth('/api/connectors'); if (res.ok) setConnectors(await res.json()); };
-  const fetchSettings = async () => { const res = await fetchWithAuth('/api/settings'); if (res.ok) { const d = await res.json(); setBudget(parseFloat(d.monthly_budget)); } };
-  const fetchMonthlyCost = async () => { const res = await fetchWithAuth('/api/metrics/monthly-cost'); if (res.ok) { const d = await res.json(); setMonthlyCost(d.total); } };
-  const fetchSubscriptions = async () => { const res = await fetchWithAuth('/api/subscriptions'); if (res.ok) setSubscriptions(await res.json()); };
-  const fetchSystems = async () => { const res = await fetchWithAuth('/api/systems'); if (res.ok) setSystems(await res.json()); };
-  const fetchRecommendations = async () => { const res = await fetchWithAuth('/api/recommendations'); if (res.ok) setRecommendations(await res.json()); };
-
-  useEffect(() => { 
-    if(token) refreshAllData(); 
-  }, [token]);
-
-  const handleSaveReportToArchive = (filename: string, content: string) => {
-    const newReport = { id: Date.now(), filename, date: new Date().toLocaleString(), content };
-    const updatedReports = [newReport, ...savedReports].slice(0, 50); 
+  const handleSaveReportToArchive = useCallback((filename: string, content: string) => {
+    const newReport: SavedReport = {
+      id: Date.now(),
+      filename,
+      date: new Date().toLocaleString(),
+      content
+    };
+    const updatedReports = [newReport, ...savedReports].slice(0, 50);
     setSavedReports(updatedReports);
     localStorage.setItem('ea_saved_reports', JSON.stringify(updatedReports));
-  };
+  }, [savedReports]);
 
-  const handleReDownload = (filename: string, content: string) => {
+  const handleReDownload = useCallback((filename: string, content: string) => {
     const blob = new Blob([content], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", filename);
+    link.href = url;
+    link.download = filename;
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
+  }, []);
 
-  const handleClearArchive = () => {
+  const handleClearArchive = useCallback(() => {
     setSavedReports([]);
     localStorage.removeItem('ea_saved_reports');
-  };
+  }, []);
 
-  const municipalUnits = ["Information Management Unit (IMU)", "Water & Sanitation Unit", "Metro Police Unit", "Parks & Recreation Unit"];
-  const imuDepartments = ["Enterprise Architecture", "Applications/Dev", "Networks", "PMO", "Security", "GIS", "Admin", "Customer Service"];
-  
-  const getUnitForDept = (deptName: string) => {
-    if (!deptName || deptName === 'Unassigned') return "Other";
-    if (imuDepartments.includes(deptName)) return "Information Management Unit (IMU)";
-    const lower = deptName.toLowerCase();
-    if (lower.includes("water") || lower.includes("sanitation")) return "Water & Sanitation Unit";
-    if (lower.includes("police")) return "Metro Police Unit";
-    if (lower.includes("park") || lower.includes("recreation")) return "Parks & Recreation Unit";
-    return "Other";
-  };
-
-  // --- FIXED DROPDOWN FILTER LOGIC ---
-  const allSystemNames = Array.from(
-    new Set(systems.map((s: any) => s.name).filter(Boolean))
-  ).sort() as string[];
-  
-  const allDeptNames = Array.from(new Set(users.map(u => u.department).filter(d => d && d !== 'Unassigned'))).sort() as string[];
-
-  const availableSystems = allSystemNames.filter(sys => {
-    if (biUnitFilter === "All" && biDeptFilter === "All") return true;
-
-    return users.some(u => {
-      const matchUnit = biUnitFilter === "All" || getUnitForDept(u.department) === biUnitFilter;
-      const matchDept = biDeptFilter === "All" || u.department === biDeptFilter;
-      const hasSys = u.assigned_systems?.some((s:any) => s.name === sys);
-      return matchUnit && matchDept && hasSys;
-    });
-  });
-
-  const availableUnits = municipalUnits.filter(unit => {
-    return users.some(u => {
-      const matchSys = biSystemFilter === "All" || u.assigned_systems?.some((s:any) => s.name === biSystemFilter);
-      const matchDept = biDeptFilter === "All" || u.department === biDeptFilter;
-      const isUnit = getUnitForDept(u.department) === unit;
-      return matchSys && matchDept && isUnit;
-    });
-  });
-
-  const availableDepts = allDeptNames.filter(dept => {
-    return users.some(u => {
-      const matchSys = biSystemFilter === "All" || u.assigned_systems?.some((s:any) => s.name === biSystemFilter);
-      const matchUnit = biUnitFilter === "All" || getUnitForDept(u.department) === biUnitFilter;
-      const isDept = u.department === dept;
-      return matchSys && matchUnit && isDept;
-    });
-  });
-
-  const handleSystemChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value;
-    setBiSystemFilter(val);
-    if (val !== "All") {
-      if (biUnitFilter !== "All" && !users.some(u => getUnitForDept(u.department) === biUnitFilter && u.assigned_systems?.some((s:any) => s.name === val))) setBiUnitFilter("All");
-      if (biDeptFilter !== "All" && !users.some(u => u.department === biDeptFilter && u.assigned_systems?.some((s:any) => s.name === val))) setBiDeptFilter("All");
-    }
-  };
-
-  const handleUnitChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value;
-    setBiUnitFilter(val);
-    if (val !== "All") {
-      if (biDeptFilter !== "All" && getUnitForDept(biDeptFilter) !== val) setBiDeptFilter("All");
-      if (biSystemFilter !== "All" && !users.some(u => getUnitForDept(u.department) === val && u.assigned_systems?.some((s:any) => s.name === biSystemFilter))) setBiSystemFilter("All");
-    }
-  };
-
-  const handleDeptChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const val = e.target.value;
-    setBiDeptFilter(val);
-    if (val !== "All") {
-      const parentUnit = getUnitForDept(val);
-      if (biUnitFilter !== parentUnit) setBiUnitFilter(parentUnit); 
-      if (biSystemFilter !== "All" && !users.some(u => u.department === val && u.assigned_systems?.some((s:any) => s.name === biSystemFilter))) setBiSystemFilter("All");
-    }
-  };
-
-  const filteredSubscriptions = subscriptions.filter(sub => {
-    if (role === 'DepartmentHead' && sub.department_id !== userDepartmentId) return false;
-    if (biSystemFilter !== "All" && sub.name !== biSystemFilter) return false;
-    if (biUnitFilter !== "All" || biDeptFilter !== "All") {
-       const userForSub = users.find(u => u.assigned_systems?.some((s:any) => s.name === sub.name && s.price === sub.price));
-       if (userForSub) {
-         if (biUnitFilter !== "All" && getUnitForDept(userForSub.department) !== biUnitFilter) return false;
-         if (biDeptFilter !== "All" && userForSub.department !== biDeptFilter) return false;
-       }
-    }
-    return true;
-  });
-
-  const filteredMonthlyCost = filteredSubscriptions.reduce((sum, sub) => sum + parseFloat(sub.price || 0), 0);
-  const filteredRecommendations = biSystemFilter === "All" ? recommendations : recommendations.filter(rec => rec.title.includes(biSystemFilter));
-  const percentUsed = budget > 0 ? (filteredMonthlyCost / budget) * 100 : 0;
-  const costColor = percentUsed >= 100 ? "text-red-600" : percentUsed >= 80 ? "text-orange-500" : "text-green-600";
-
-  const handleExportData = () => {
+  // ----------------------------------------------------------------
+  // 8. EXPORT
+  // ----------------------------------------------------------------
+  const handleExportData = useCallback(() => {
+    const dateStamp = new Date().toISOString().split('T')[0];
     let csvContent = "";
     let filename = "";
-    const dateStamp = new Date().toISOString().split('T')[0];
 
     if (activeTab === 'systems') {
       const headers = ['System ID', 'System Name', 'Category', 'Date Added', 'Deployed Departments'];
       const rows = systems.map(app => [
-        app.id, `"${app.name}"`, `"${app.category}"`, app.created_at, `"${app.departments?.join(', ') || 'None'}"`
+        app.id,
+        app.name,
+        app.category,
+        app.created_at ?? '',
+        app.departments?.join(', ') ?? 'None'
       ]);
-      csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+      csvContent = [headers.join(','), ...rows.map(r => r.map(escapeCsv).join(','))].join('\n');
       filename = `eThekwini_IT_Catalog_${dateStamp}.csv`;
     } else {
       const headers = ['System Name', 'Category', 'Monthly Cost (ZAR)', 'Assigned Project', 'Status'];
       const rows = filteredSubscriptions.map(sub => [
-        `"${sub.name}"`, `"${sub.category}"`, sub.price, `"${sub.project_name || 'Operational (No Project)'}"`, 'Active'
+        sub.name,
+        sub.category,
+        sub.price,
+        sub.project_name || 'Operational (No Project)',
+        'Active'
       ]);
-      csvContent = [headers.join(','), ...rows.map(e => e.join(','))].join('\n');
+      csvContent = [headers.join(','), ...rows.map(r => r.map(escapeCsv).join(','))].join('\n');
       filename = `Municipal_SaaS_Audit_${dateStamp}.csv`;
     }
 
@@ -340,14 +495,70 @@ const Index = () => {
     const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    link.setAttribute("href", url);
-    link.setAttribute("download", filename);
+    link.href = url;
+    link.download = filename;
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-  };
+  }, [activeTab, systems, filteredSubscriptions, handleSaveReportToArchive]);
 
+  // ----------------------------------------------------------------
+  // 9. FILTER EVENT HANDLERS
+  // ----------------------------------------------------------------
+  const handleSystemChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setBiSystemFilter(val);
+    if (val !== "All") {
+      if (biUnitFilter !== "All" && !users.some(u => getUnitForDept(u.department) === biUnitFilter && u.assigned_systems?.some(s => s.name === val))) {
+        setBiUnitFilter("All");
+      }
+      if (biDeptFilter !== "All" && !users.some(u => u.department === biDeptFilter && u.assigned_systems?.some(s => s.name === val))) {
+        setBiDeptFilter("All");
+      }
+    }
+  }, [biUnitFilter, biDeptFilter, users]);
+
+  const handleUnitChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setBiUnitFilter(val);
+    if (val !== "All") {
+      if (biDeptFilter !== "All" && getUnitForDept(biDeptFilter) !== val) setBiDeptFilter("All");
+      if (biSystemFilter !== "All" && !users.some(u => getUnitForDept(u.department) === val && u.assigned_systems?.some(s => s.name === biSystemFilter))) {
+        setBiSystemFilter("All");
+      }
+    }
+  }, [biDeptFilter, biSystemFilter, users]);
+
+  const handleDeptChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    const val = e.target.value;
+    setBiDeptFilter(val);
+    if (val !== "All") {
+      const parentUnit = getUnitForDept(val);
+      if (biUnitFilter !== parentUnit) setBiUnitFilter(parentUnit);
+      if (biSystemFilter !== "All" && !users.some(u => u.department === val && u.assigned_systems?.some(s => s.name === biSystemFilter))) {
+        setBiSystemFilter("All");
+      }
+    }
+  }, [biUnitFilter, biSystemFilter, users]);
+
+  // ----------------------------------------------------------------
+  // 10. EFFECTS
+  // ----------------------------------------------------------------
+  useEffect(() => {
+    if (token) refreshAllData();
+  }, [token, refreshAllData]);
+
+  useEffect(() => {
+    if (visibleNavItems.length > 0 && !visibleNavItems.find(item => item.id === activeTab)) {
+      setActiveTab(visibleNavItems[0].id);
+      setSelectedDeptId(null);
+    }
+  }, [activeTab, visibleNavItems]);
+
+  // ----------------------------------------------------------------
+  // 11. RENDER HELPERS
+  // ----------------------------------------------------------------
   if (!token) return <Login onLoginSuccess={handleLoginSuccess} />;
 
   const UnauthorizedView = () => (
@@ -358,7 +569,6 @@ const Index = () => {
     </div>
   );
 
-  // --- THE TRAFFIC CONTROLLER ---
   const renderDashboardContent = () => {
     switch (role) {
       case 'SuperAdmin':
@@ -366,7 +576,7 @@ const Index = () => {
       case 'CIO':
       case 'DepartmentHead':
         return (
-          <CIODashboard 
+          <CIODashboard
             systems={systems}
             subscriptions={filteredSubscriptions}
             monthlyCost={filteredMonthlyCost}
@@ -382,20 +592,17 @@ const Index = () => {
           />
         );
 
-      case 'DepartmentHead': 
-      return <DepartmentDashboard/>;
-      
       case 'ApplicationsHead':
         return <AppsDashboard systems={systems} />;
 
       case 'PMOLead':
-        return <PMODashboard />; 
+        return <PMODashboard />;
 
       case 'CRMHead':
         return <CRMDashboard />;
 
       case 'NetworksHead':
-        return <NetworksDashboard systems={systems} />; 
+        return <NetworksDashboard systems={systems} />;
 
       case 'StandardUser':
       default:
@@ -420,35 +627,65 @@ const Index = () => {
     }
 
     switch (activeTab) {
-      case "admin": return role === 'SuperAdmin' ? <AdminTab onRefresh={refreshAllData} onExport={handleExportData} budget={budget} onUpdateBudget={handleUpdateBudget} connectors={connectors} onAddConnector={handleAddConnector} stats={{ totalApps: systems.length, activeSubscriptions: subscriptions.length, recommendations: recommendations.length, monthlyCost }} /> : <UnauthorizedView />;
-      case "systems": return <AppsTab apps={systems} onAddApp={refreshAllData} />; 
-      case "subscriptions": return ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead'].includes(role) ? <SubscriptionsTab subscriptions={subscriptions} onAddSubscription={refreshAllData} /> : <UnauthorizedView />;
-      case "audit": return ['SuperAdmin', 'EA'].includes(role) ? 
-        <AuditTab 
-            duplications={duplications} 
-            deptSpend={deptSpend} 
-            onDepartmentClick={handleDepartmentClick} 
-            systems={systems} 
-        /> : <UnauthorizedView />;
-      case "recommendations": return ['SuperAdmin', 'CIO'].includes(role) ? 
-        <RecommendationsTab 
-            recommendations={recommendations} 
-            onReclaim={handleReclaim} 
-            onInvestigate={(sysName) => {
-                setActiveTab('users');
-                setBiSystemFilter(sysName);
-                setBiUnitFilter('All');
-                setBiDeptFilter('All');
+      case "admin":
+        return role === 'SuperAdmin' ? (
+          <AdminTab
+            onRefresh={refreshAllData}
+            onExport={handleExportData}
+            budget={budget}
+            onUpdateBudget={handleUpdateBudget}
+            connectors={connectors}
+            onAddConnector={handleAddConnector}
+            stats={{ totalApps: systems.length, activeSubscriptions: subscriptions.length, recommendations: recommendations.length, monthlyCost }}
+          />
+        ) : <UnauthorizedView />;
+
+      case "systems":
+        return <AppsTab apps={systems} onAddApp={refreshAllData} />;
+
+      case "subscriptions":
+        return SUBSCRIPTION_ROLES.includes(role) ? (
+          <SubscriptionsTab subscriptions={subscriptions} onAddSubscription={refreshAllData} />
+        ) : <UnauthorizedView />;
+
+      case "audit":
+        return AUDIT_ROLES.includes(role) ? (
+          <AuditTab
+            duplications={duplications}
+            deptSpend={deptSpend}
+            onDepartmentClick={handleDepartmentClick}
+            systems={systems}
+          />
+        ) : <UnauthorizedView />;
+
+      case "recommendations":
+        return RECOMMENDATION_ROLES.includes(role) ? (
+          <RecommendationsTab
+            recommendations={recommendations}
+            onReclaim={handleReclaim}
+            onInvestigate={(sysName: string) => {
+              setActiveTab('users');
+              setBiSystemFilter(sysName);
+              setBiUnitFilter('All');
+              setBiDeptFilter('All');
             }}
-        /> : <UnauthorizedView />;
-      case "users": return ['SuperAdmin', 'EA', 'DepartmentHead'].includes(role) ? 
-        <UsersTab 
-            users={users} 
-            onRefresh={refreshAllData} 
+          />
+        ) : <UnauthorizedView />;
+
+      case "users":
+        return USER_ROLES.includes(role) ? (
+          <UsersTab
+            users={users}
+            onRefresh={refreshAllData}
             investigationQuery={biSystemFilter !== "All" ? biSystemFilter : undefined}
-        /> : <UnauthorizedView />;
-      case "ea-strategy": return ['SuperAdmin', 'EA'].includes(role) ? <EAStrategyTab /> : <UnauthorizedView />;
-      default: return renderDashboardContent();
+          />
+        ) : <UnauthorizedView />;
+
+      case "ea-strategy":
+        return EA_STRATEGY_ROLES.includes(role) ? <EAStrategyTab /> : <UnauthorizedView />;
+
+      default:
+        return renderDashboardContent();
     }
   };
 
@@ -457,36 +694,39 @@ const Index = () => {
       <div className="px-3 text-gray-500 border-r border-gray-200 flex items-center bg-gray-50 rounded-l-lg h-9">
         <Filter className="h-4 w-4" />
       </div>
-      
-      <select 
-        className="bg-transparent text-xs font-bold text-blue-900 outline-none cursor-pointer border-r border-gray-200 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
-        value={biSystemFilter} 
+
+      <select
+        className="bg-transparent text-xs font-bold text-blue-900 outline-none cursor-pointer border-r border-gray-200 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]"
+        value={biSystemFilter}
         onChange={handleSystemChange}
       >
         <option value="All">All Systems</option>
-        {availableSystems.map(name => <option key={name as string} value={name as string}>{name as string}</option>)}
+        {availableSystems.map(name => <option key={name} value={name}>{name}</option>)}
       </select>
 
-      <select 
-        className="bg-transparent text-xs font-bold text-blue-900 outline-none cursor-pointer border-r border-gray-200 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]" 
-        value={biUnitFilter} 
+      <select
+        className="bg-transparent text-xs font-bold text-blue-900 outline-none cursor-pointer border-r border-gray-200 px-3 h-9 hover:bg-gray-50 transition-colors max-w-[200px]"
+        value={biUnitFilter}
         onChange={handleUnitChange}
       >
         <option value="All">All Units</option>
         {availableUnits.map(unit => <option key={unit} value={unit}>{unit}</option>)}
       </select>
 
-      <select 
-        className="bg-transparent text-xs font-bold text-blue-900 outline-none cursor-pointer px-3 h-9 hover:bg-gray-50 transition-colors rounded-r-lg max-w-[200px]" 
-        value={biDeptFilter} 
+      <select
+        className="bg-transparent text-xs font-bold text-blue-900 outline-none cursor-pointer px-3 h-9 hover:bg-gray-50 transition-colors rounded-r-lg max-w-[200px]"
+        value={biDeptFilter}
         onChange={handleDeptChange}
       >
         <option value="All">All Departments</option>
-        {availableDepts.map(name => <option key={name as string} value={name as string}>{name as string}</option>)}
+        {availableDepts.map(name => <option key={name} value={name}>{name}</option>)}
       </select>
     </div>
   );
 
+  // ----------------------------------------------------------------
+  // 12. LIVE MODE
+  // ----------------------------------------------------------------
   if (isLiveMode) {
     return (
       <div className="flex flex-col h-screen bg-gray-50 overflow-hidden">
@@ -500,7 +740,7 @@ const Index = () => {
               <p className="text-[10px] text-yellow-400 uppercase tracking-widest font-bold">Live Data Feed</p>
             </div>
           </div>
-          
+
           {['SuperAdmin', 'DepartmentHead', 'EA'].includes(role) && (
             <div className="flex items-center ml-8">
               {renderTripleTierFilters()}
@@ -523,11 +763,15 @@ const Index = () => {
     );
   }
 
+  // ----------------------------------------------------------------
+  // 13. MAIN LAYOUT
+  // ----------------------------------------------------------------
   return (
     <div className="flex h-screen overflow-hidden relative bg-gray-50">
-      
+
+      {/* Sidebar */}
       <aside className={`${isSidebarCollapsed ? 'w-20' : 'w-64'} bg-gradient-to-b from-blue-900 to-blue-800 border-r border-blue-950 flex flex-col shrink-0 shadow-sm z-20 transition-all duration-300 ease-in-out relative`}>
-        
+
         <div className="h-20 flex items-center justify-center px-4 border-b border-blue-800 bg-[#00a9e0] shrink-0">
           <div className={`flex items-center ${isSidebarCollapsed ? 'justify-center' : 'space-x-3 w-full'}`}>
             <div className="w-9 h-9 bg-yellow-400 rounded-lg flex items-center justify-center shadow-sm shrink-0">
@@ -535,7 +779,7 @@ const Index = () => {
             </div>
             {!isSidebarCollapsed && (
               <div className="overflow-hidden whitespace-nowrap">
-                <h1 className="text-xl font-bold text-white tracking-tight">SAM</h1>
+                <h1 className="text-xl font-bold text-white tracking-tight">SEAM</h1>
                 <p className="text-[9px] text-yellow-300 uppercase tracking-widest font-bold mt-0.5">Enterprise System</p>
               </div>
             )}
@@ -551,11 +795,10 @@ const Index = () => {
                 key={item.id}
                 onClick={() => { setActiveTab(item.id); setSelectedDeptId(null); }}
                 title={isSidebarCollapsed ? item.label : undefined}
-                className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center' : 'space-x-3'} px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                  isActive 
-                  ? 'bg-blue-950 text-yellow-400 font-bold border-l-4 border-yellow-400 rounded-l-none' 
-                  : 'text-blue-100 hover:bg-blue-800 hover:text-white'
-                }`}
+                className={`w-full flex items-center ${isSidebarCollapsed ? 'justify-center' : 'space-x-3'} px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 ${isActive
+                    ? 'bg-blue-950 text-yellow-400 font-bold border-l-4 border-yellow-400 rounded-l-none'
+                    : 'text-blue-100 hover:bg-blue-800 hover:text-white'
+                  }`}
               >
                 <Icon className={`h-4 w-4 shrink-0 ${isActive ? 'text-yellow-400' : 'text-blue-300'}`} />
                 {!isSidebarCollapsed && <span className="whitespace-nowrap">{item.label}</span>}
@@ -581,20 +824,21 @@ const Index = () => {
             </div>
           )}
           <Button onClick={handleLogout} variant="outline" className={`w-full bg-blue-950 border-blue-800 text-blue-200 hover:bg-red-500 hover:text-white hover:border-red-600 transition-colors shadow-sm ${isSidebarCollapsed ? 'px-0 justify-center' : ''}`} title={isSidebarCollapsed ? "Logout" : undefined}>
-            <LogOut className={`h-4 w-4 ${isSidebarCollapsed ? '' : 'mr-2'}`} /> 
+            <LogOut className={`h-4 w-4 ${isSidebarCollapsed ? '' : 'mr-2'}`} />
             {!isSidebarCollapsed && "Logout"}
           </Button>
         </div>
       </aside>
 
+      {/* Main */}
       <main className="flex-1 flex flex-col h-screen overflow-hidden bg-gray-50 relative z-0">
-        
+
         <header className="h-20 bg-blue-900 border-b border-blue-800 px-8 flex items-center justify-between shrink-0 shadow-md z-10">
           <div className="flex items-center space-x-4 flex-1">
-            <Button 
-              variant="ghost" 
-              size="icon" 
-              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)} 
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={() => setIsSidebarCollapsed(!isSidebarCollapsed)}
               className="text-blue-200 hover:bg-blue-800 hover:text-white rounded-full h-9 w-9 shrink-0 transition-colors"
             >
               <Menu className="h-5 w-5" />
@@ -605,7 +849,7 @@ const Index = () => {
                 {activeTab === 'users' ? 'Identity Matrix' : activeTab.replace('-', ' ')}
               </h2>
             )}
-            
+
             {activeTab === 'dashboard' && ['SuperAdmin', 'DepartmentHead', 'EA'].includes(role) && (
               <div className="ml-2">
                 {renderTripleTierFilters()}
@@ -615,37 +859,37 @@ const Index = () => {
 
           <div className="flex items-center space-x-3 shrink-0">
             <div className="flex items-center space-x-2">
-                {activeTab === 'dashboard' && (
-                  <Button 
-                    onClick={() => setIsLiveMode(true)} 
-                    className="bg-yellow-400 hover:bg-yellow-500 text-blue-900 font-bold shadow-sm h-9 px-4 mr-2"
-                  >
-                    <Monitor className="h-4 w-4 mr-2" /> Live Dashboard
-                  </Button>
-                )}
-
-                <Button 
-                  onClick={() => setIsArchiveOpen(true)} 
-                  variant="outline" 
-                  size="icon" 
-                  className="bg-blue-800 border-blue-700 text-blue-100 hover:bg-blue-700 hover:text-white shadow-sm h-9 w-9 relative transition-colors" 
-                  title="Report Archive"
+              {activeTab === 'dashboard' && (
+                <Button
+                  onClick={() => setIsLiveMode(true)}
+                  className="bg-yellow-400 hover:bg-yellow-500 text-blue-900 font-bold shadow-sm h-9 px-4 mr-2"
                 >
-                  <Archive className="h-4 w-4" />
-                  {savedReports.length > 0 && (
-                    <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold h-4 w-4 rounded-full flex items-center justify-center">
-                      {savedReports.length}
-                    </span>
-                  )}
+                  <Monitor className="h-4 w-4 mr-2" /> Live Dashboard
                 </Button>
+              )}
 
-                <Button onClick={handleExportData} variant="outline" size="icon" className="bg-blue-800 border-blue-700 text-blue-100 hover:text-white hover:bg-blue-700 shadow-sm h-9 w-9 transition-colors" title="Export Current View">
-                    <Download className="h-4 w-4" />
-                </Button>
-                
-                <Button onClick={refreshAllData} disabled={isLoading} variant="outline" size="icon" className="bg-blue-800 border-blue-700 text-blue-100 hover:text-white hover:bg-blue-700 shadow-sm h-9 w-9 disabled:opacity-50 transition-colors" title="Refresh Engine">
-                    <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin text-yellow-400' : ''}`} />
-                </Button>
+              <Button
+                onClick={() => setIsArchiveOpen(true)}
+                variant="outline"
+                size="icon"
+                className="bg-blue-800 border-blue-700 text-blue-100 hover:bg-blue-700 hover:text-white shadow-sm h-9 w-9 relative transition-colors"
+                title="Report Archive"
+              >
+                <Archive className="h-4 w-4" />
+                {savedReports.length > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-500 text-white text-[9px] font-bold h-4 w-4 rounded-full flex items-center justify-center">
+                    {savedReports.length}
+                  </span>
+                )}
+              </Button>
+
+              <Button onClick={handleExportData} variant="outline" size="icon" className="bg-blue-800 border-blue-700 text-blue-100 hover:text-white hover:bg-blue-700 shadow-sm h-9 w-9 transition-colors" title="Export Current View">
+                <Download className="h-4 w-4" />
+              </Button>
+
+              <Button onClick={refreshAllData} disabled={isLoading} variant="outline" size="icon" className="bg-blue-800 border-blue-700 text-blue-100 hover:text-white hover:bg-blue-700 shadow-sm h-9 w-9 disabled:opacity-50 transition-colors" title="Refresh Engine">
+                <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin text-yellow-400' : ''}`} />
+              </Button>
             </div>
           </div>
         </header>
@@ -653,11 +897,12 @@ const Index = () => {
         <div className="flex-1 overflow-y-auto p-8 custom-scrollbar relative z-0">
           {renderTabContent()}
         </div>
-        
+
         <Footer />
-        
+
       </main>
 
+      {/* Archive Modal */}
       {isArchiveOpen && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex items-center justify-center animate-in fade-in duration-200 p-4">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
@@ -670,7 +915,7 @@ const Index = () => {
                 <X className="h-5 w-5" />
               </button>
             </div>
-            
+
             <div className="flex-1 overflow-y-auto p-2 bg-gray-50 custom-scrollbar">
               {savedReports.length === 0 ? (
                 <div className="py-20 flex flex-col items-center justify-center text-gray-400">
@@ -689,9 +934,9 @@ const Index = () => {
                           <p className="text-[10px] uppercase tracking-wider font-bold text-gray-500 mt-1">{report.date}</p>
                         </div>
                       </div>
-                      <Button 
-                        onClick={() => handleReDownload(report.filename, report.content)} 
-                        variant="outline" 
+                      <Button
+                        onClick={() => handleReDownload(report.filename, report.content)}
+                        variant="outline"
                         size="sm"
                         className="bg-white text-blue-900 hover:bg-blue-50 hover:border-blue-200 border-gray-200 shadow-sm shrink-0 font-bold"
                       >
@@ -703,7 +948,7 @@ const Index = () => {
                 </div>
               )}
             </div>
-            
+
             {savedReports.length > 0 && (
               <div className="px-6 py-3 border-t border-gray-200 bg-white flex justify-end">
                 <Button onClick={handleClearArchive} variant="ghost" className="text-red-600 hover:bg-red-50 hover:text-red-700 text-xs font-bold">

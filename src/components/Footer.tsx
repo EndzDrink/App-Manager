@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Info, Mail, ShieldCheck, ExternalLink } from 'lucide-react';
+import { X, Info, Mail, ShieldCheck, ExternalLink, Monitor } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
 export default function Footer() {
@@ -12,7 +12,7 @@ export default function Footer() {
       {/* FIXED FOOTER */}
       <footer className="shrink-0 w-full bg-white border-t border-gray-200 px-6 py-2 flex flex-col sm:flex-row items-center justify-between text-[10px] uppercase tracking-wider font-semibold text-gray-400 z-50 relative shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
         <div className="flex items-center mb-1 sm:mb-0">
-          <span>&copy; {currentYear} Smart Analytics Manager.</span>
+          <span>&copy; {currentYear} SEAM</span>
           <span className="mx-2">|</span>
           <span className="text-sky-500 font-bold flex items-center">
             Developed by ILAMI TECHNOLOGIES <ExternalLink className="h-3 w-3 ml-1" />
@@ -38,9 +38,9 @@ export default function Footer() {
             </div>
             <div className="p-6 text-center space-y-3">
               <div className="w-12 h-12 bg-sky-50 text-sky-600 rounded-lg flex items-center justify-center mx-auto mb-2 border border-sky-100">
-                <ShieldCheck className="h-6 w-6" />
+                <Monitor className="h-6 w-6" />
               </div>
-              <h3 className="font-bold text-gray-900">Smart Analytics Manager v2.1.0</h3>
+              <h3 className="font-bold text-gray-900">Smart Enterprise Analytics Manager v2.1.0</h3>
               <p className="text-xs text-gray-500 leading-relaxed">
                 Enterprise Architecture mapping and software asset management system designed specifically for municipal environments. 
               </p>
