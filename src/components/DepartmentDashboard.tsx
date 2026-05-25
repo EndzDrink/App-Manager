@@ -24,7 +24,6 @@ export const DepartmentDashboard = () => {
     setIsRefreshing(true);
     try {
       const token = localStorage.getItem('appManagerToken');
-      const deptId = localStorage.getItem('appManagerDeptId');
       const headers = { 'Authorization': `Bearer ${token}` };
 
       // In a real app, these endpoints would filter by deptId automatically via the backend token

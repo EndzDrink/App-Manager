@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
-  Lightbulb, CheckCircle2, Sparkles, Activity, BrainCircuit, Search, X, Trash2, ShieldAlert, Loader2 
+  Lightbulb, CheckCircle2, BotMessageSquare, Activity, BrainCircuit, Search, X, Trash2, ShieldAlert, Loader2 
 } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -10,7 +10,6 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 interface RecommendationsTabProps {
   recommendations: any[];
   onReclaim: (id: number) => Promise<void>;
-  // Navigation hook to jump to source data in Users Tab
   onInvestigate: (systemName: string) => void;
 }
 
@@ -76,13 +75,13 @@ export const RecommendationsTab: React.FC<RecommendationsTabProps> = ({ recommen
       {/* 1. CIO AI ADVISOR MODULE */}
       <Card className="p-6 bg-gradient-to-br from-indigo-900 to-blue-900 border-none shadow-xl text-white relative overflow-hidden">
         <div className="absolute top-0 right-0 p-8 opacity-10 pointer-events-none">
-          <Sparkles className="w-32 h-32" />
+          <BotMessageSquare className="w-32 h-32" />
         </div>
         
         <div className="relative z-10">
           <div className="flex items-center space-x-3 mb-4">
             <div className="p-2 bg-indigo-500/30 rounded-lg backdrop-blur-sm">
-              <Sparkles className="h-5 w-5 text-indigo-100" />
+              <BotMessageSquare className="h-5 w-5 text-indigo-100" />
             </div>
             <div>
               <h3 className="font-bold text-lg tracking-wide">CIO Advisor</h3>
