@@ -1,7 +1,7 @@
 import React from 'react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ArrowLeft, Users, MonitorSmartphone, Building2 } from "lucide-react";
+import { ArrowLeft, Users, MonitorSmartphone, Building2, AlertTriangle } from "lucide-react";
 
 interface DepartmentDetailProps {
   details: any;
@@ -113,12 +113,25 @@ export const DepartmentDetailTab: React.FC<DepartmentDetailProps> = ({ details, 
 
           <div className="space-y-3 overflow-y-auto custom-scrollbar flex-1 pr-1">
             {apps?.map((app: any, i: number) => {
-              const appCost = parseFloat(app.price || app.total_cost || "0");
+              // ROBUST COST PARSER
+              const rawCost = app.price || app.monthly_cost || app.total_cost || "0";
+              const parsedCost = parseFloat(String(rawCost).replace(/,/g, ''));
+              const appCost = isNaN(parsedCost) ? 0 : parsedCost;
+              
+              // MOCK IDLE FLAG (Matching the DepartmentDashboard logic)
+              const isIdle = i % 4 === 0; 
               
               return (
-                <div key={app.name || i} className="flex justify-between items-center p-3 bg-white border border-gray-200 rounded-lg hover:border-blue-300 hover:shadow-sm transition-all">
+                <div key={app.name || i} className={`flex justify-between items-center p-3 border rounded-lg transition-all ${isIdle ? 'bg-orange-50/50 border-orange-200' : 'bg-white border-gray-200 hover:border-blue-300 hover:shadow-sm'}`}>
                   <div>
-                    <p className="text-sm font-bold text-gray-900">{app.name}</p>
+                    <div className="flex items-center">
+                      <p className="text-sm font-bold text-gray-900">{app.name}</p>
+                      {isIdle && (
+                        <span className="ml-2 flex items-center text-[8px] font-black uppercase tracking-wider text-orange-700 bg-orange-100 px-1.5 py-0.5 rounded border border-orange-200">
+                          <AlertTriangle className="h-2.5 w-2.5 mr-1" /> Idle
+                        </span>
+                      )}
+                    </div>
                     <p className="text-[9px] font-bold text-blue-800 uppercase tracking-widest bg-blue-50 border border-blue-100 inline-block px-1.5 py-0.5 rounded mt-1.5">
                       {app.category || "General"}
                     </p>

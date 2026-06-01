@@ -69,7 +69,6 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
     setErrorMsg('');
     try {
       const token = localStorage.getItem('appManagerToken');
-      // For this UI, we map the owningDept name to a mock ID for the backend
       const deptMap: Record<string, number> = {
         'Information Management Unit (IMU)': 1,
         'Water & Sanitation Unit': 2,
@@ -133,19 +132,14 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
     } finally { setIsTransferring(false); }
   }
 
-  // --- NEW: INLINE RECONCILIATION ---
   const handleAssignLicense = async (subId: number, targetUserId: string) => {
       if (!targetUserId) return;
       setIsReconciling(subId);
       
       try {
         const token = localStorage.getItem('appManagerToken');
-        
-        // Find the user object to grab their department so we update both
         const targetUser = availableUsers.find(u => u.id.toString() === targetUserId);
         
-        // Use a generic PUT or a custom endpoint to update the subscription
-        // We will simulate updating the assignment and shifting the ownership to their dept
         const deptMap: Record<string, number> = {
             'Information Management Unit (IMU)': 1,
             'Water & Sanitation Unit': 2,
@@ -166,7 +160,7 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
         });
 
         if (res.ok) {
-            onAddSubscription(); // Refresh data
+            onAddSubscription(); 
         } else {
             console.error("Failed to assign license");
         }
@@ -177,24 +171,30 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
       }
   }
 
+  // ROBUST COST PARSER: Safely handles nulls, strings, and missing price fields
+  const getCost = (val: any) => {
+    if (val === null || val === undefined) return 0;
+    const parsed = parseFloat(String(val).replace(/,/g, ''));
+    return isNaN(parsed) ? 0 : parsed;
+  };
+
   const safeUsers = Array.isArray(availableUsers) ? availableUsers : [];
   
   const enrichedSubs = subscriptions.map((sub, index) => {
     const user = safeUsers.find(u => u.id === sub.assigned_user_id) || { id: 0, email: 'Unassigned', department: 'None' };
     const isIdle = user.id !== 0 && (index % 4 === 0);
-    // If the database doesn't return owning_dept, fall back to our mapped data
-    // We treat user.id === 0 (unassigned) as an "Orphaned Asset" and force the owningDept to 'Unknown'
     const simulatedOwningDept = user.id === 0 ? 'Unknown' : (sub.owning_dept || user.department);
     const isCrossDepartment = user.id !== 0 && user.department !== simulatedOwningDept && user.department !== 'None';
+    
+    // Check both monthly_cost and price columns
+    const computedCost = getCost(sub.monthly_cost || sub.price);
 
-    return { ...sub, user, isIdle, isUnassigned: user.id === 0, owningDept: simulatedOwningDept, isCrossDepartment, mockDaysAgo: isIdle ? 35 : 0 };
+    return { ...sub, user, isIdle, isUnassigned: user.id === 0, owningDept: simulatedOwningDept, isCrossDepartment, computedCost, mockDaysAgo: isIdle ? 35 : 0 };
   });
 
-  // Calculate Orphaned Assets
   const orphanedAssets = enrichedSubs.filter(s => s.isUnassigned);
-  const orphanedSpend = orphanedAssets.reduce((sum, s) => sum + parseFloat(s.price || 0), 0);
+  const orphanedSpend = orphanedAssets.reduce((sum, s) => sum + s.computedCost, 0);
 
-  // FIXED: Pre-initialize the 4 base departments so cards NEVER disappear
   const baseDepts: Record<string, DeptPool> = {
     'Information Management Unit (IMU)': { name: 'Information Management Unit (IMU)', budget: 500000, spend: 0, active: 0, idle: 0, unassigned: 0 },
     'Water & Sanitation Unit': { name: 'Water & Sanitation Unit', budget: 1200000, spend: 0, active: 0, idle: 0, unassigned: 0 },
@@ -203,14 +203,12 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
   };
 
   enrichedSubs.forEach((sub) => {
-    // If the dept isn't in our base list, and it's NOT 'Unknown', add it dynamically
     if (sub.owningDept !== 'Unknown' && !baseDepts[sub.owningDept]) {
       baseDepts[sub.owningDept] = { name: sub.owningDept, budget: 150000, spend: 0, active: 0, idle: 0, unassigned: 0 };
     }
     
-    // Only tally spend for known departments
     if (sub.owningDept !== 'Unknown') {
-        baseDepts[sub.owningDept].spend += parseFloat(sub.price || 0);
+        baseDepts[sub.owningDept].spend += sub.computedCost;
         if (sub.isIdle) baseDepts[sub.owningDept].idle++;
         else baseDepts[sub.owningDept].active++;
     }
@@ -219,10 +217,8 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
   const deptArray = Object.values(baseDepts).sort((a, b) => b.spend - a.spend);
 
   return (
-    // FIXED: Strict flex-col layout ensures table scrolls, cards stay fixed
     <div className="animate-in fade-in duration-500 h-full flex flex-col pb-4 max-w-[1600px] mx-auto">
       
-      {/* HEADER (Fixed) */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-gray-200 mb-6 shrink-0">
         <div>
           <h2 className="text-xl font-bold text-gray-900 flex items-center tracking-tight">
@@ -239,7 +235,6 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
         </Button>
       </div>
 
-      {/* ORPHANED ASSET HITLIST WARNING (Conditional) */}
       {orphanedAssets.length > 0 && !isAdding && (
           <div className="bg-red-50 border-l-4 border-red-600 p-5 mb-6 rounded-r-xl shadow-sm flex flex-col sm:flex-row sm:items-center justify-between animate-in slide-in-from-top-2 shrink-0">
               <div className="flex items-start mb-3 sm:mb-0">
@@ -254,7 +249,6 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
           </div>
       )}
 
-      {/* CARDS (Fixed) */}
       {!isAdding && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5 mb-6 shrink-0">
           {deptArray.slice(0, 4).map((dept: DeptPool, i: number) => {
@@ -302,7 +296,6 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
         </div>
       )}
 
-      {/* ADD FORM (Fixed) */}
       {isAdding && (
         <div className="bg-white p-6 rounded-xl border border-sky-200 shadow-md mb-6 animate-in slide-in-from-top-2 shrink-0">
           <h3 className="text-sm font-bold text-blue-900 mb-4 flex items-center border-b border-gray-100 pb-3">
@@ -391,7 +384,7 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
         </div>
       )}
 
-      {/* TABLE AREA (Flexible, Scrollable) */}
+      {/* TABLE AREA */}
       <Card className="bg-white border border-gray-200 shadow-sm rounded-xl flex flex-col flex-1 min-h-0 overflow-hidden">
         <div className="bg-gray-50/50 px-6 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
           <span className="text-xs font-bold text-blue-900 uppercase tracking-wider">Enterprise License Directory</span>
@@ -419,7 +412,7 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
                       </div>
                       <div>
                         <p className={`font-bold transition-colors ${sub.isUnassigned ? 'text-red-900' : 'text-gray-900 group-hover:text-blue-900'}`}>{sub.name}</p>
-                        <p className="text-[10px] text-gray-500 font-black mt-0.5">ZAR {parseFloat(sub.price).toLocaleString()}/mo</p>
+                        <p className="text-[10px] text-gray-500 font-black mt-0.5">ZAR {sub.computedCost.toLocaleString()}/mo</p>
                       </div>
                     </div>
                   </td>
@@ -493,7 +486,7 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
                           title="Initiate Departmental Transfer"
                         >
                           <ArrowRightLeft className="h-4 w-4 mr-1" />
-                          <span className="text-[10px] font-bold uppercase">Transfer</span>
+                          <span className="text-[10px] font-bold u...ppercase">Transfer</span>
                         </button>
                       )}
                       <button 
@@ -550,7 +543,7 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
               <div className="space-y-3">
                 <Button onClick={handleExecuteTransfer} disabled={isTransferring} className="w-full bg-blue-800 hover:bg-blue-900 text-white shadow-sm h-12 flex justify-between">
                   <span>{isTransferring ? 'Processing...' : 'Authorize Transfer & Shift Billing'}</span>
-                  {!isTransferring && <span className="text-yellow-400 text-xs bg-blue-950 px-2 py-1 rounded">ZAR {parseFloat(transferModal.price).toLocaleString()} / mo</span>}
+                  {!isTransferring && <span className="text-yellow-400 text-xs bg-blue-950 px-2 py-1 rounded">ZAR {transferModal.computedCost.toLocaleString()} / mo</span>}
                 </Button>
                 <Button onClick={() => setTransferModal(null)} variant="outline" className="w-full border-gray-300 text-gray-700 h-10">
                   Cancel
