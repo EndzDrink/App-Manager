@@ -24,7 +24,8 @@ export const StaffDashboard = () => {
       const subRes = await fetch(`${API_URL}/api/subscriptions`, { headers });
       if (subRes.ok) {
         const subData = await subRes.json();
-        const myUserId = JSON.parse(localStorage.getItem('appManagerUser') || '{}').id;
+        const userStr = localStorage.getItem('appManagerUser');
+        const myUserId = userStr ? JSON.parse(userStr).id : 1; // Fallback to 1 for demo purposes if not found
         setActiveApps(subData.filter((s: any) => s.assigned_user_id === myUserId));
       }
 
@@ -148,7 +149,7 @@ export const StaffDashboard = () => {
           </div>
         </Card>
 
-        {/* RIGHT PANE: PROCUREMENT PIPELINE (FILTERED) */}
+        {/* RIGHT PANE: PROCUREMENT PIPELINE */}
         <Card className="bg-white border border-gray-200 shadow-sm flex flex-col h-full overflow-hidden">
           <div className="p-4 border-b border-gray-100 bg-gray-50/50 shrink-0 flex items-center justify-between">
             <h3 className="text-sm font-black text-blue-900 uppercase tracking-wider flex items-center">
@@ -175,20 +176,20 @@ export const StaffDashboard = () => {
                       
                       <span className={`text-[9px] font-black uppercase tracking-wider px-2 py-1 rounded flex items-center ${
                         req.ea_status === 'Approved' ? 'bg-green-100 text-green-700 border border-green-200' :
-                        req.ea_status === 'Rejected' ? 'bg-red-100 text-red-700 border border-red-200' :
+                        req.ea_status === 'Rejected' || req.ea_status === 'Vetoed' ? 'bg-red-100 text-red-700 border border-red-200' :
                         'bg-yellow-100 text-yellow-700 border border-yellow-200'
                       }`}>
                         {req.ea_status === 'Approved' ? <CheckCircle2 className="h-3 w-3 mr-1" /> : 
-                         req.ea_status === 'Rejected' ? <AlertCircle className="h-3 w-3 mr-1" /> : 
+                         req.ea_status === 'Rejected' || req.ea_status === 'Vetoed' ? <AlertCircle className="h-3 w-3 mr-1" /> : 
                          <Clock className="h-3 w-3 mr-1" />}
                         {req.ea_status}
                       </span>
                     </div>
 
                     <div className="w-full bg-gray-100 rounded-full h-1.5 mb-1">
-                      <div className={`h-1.5 rounded-full ${
+                      <div className={`h-1.5 rounded-full transition-all duration-500 ${
                         req.ea_status === 'Approved' ? 'w-full bg-green-500' : 
-                        req.ea_status === 'Rejected' ? 'w-full bg-red-500' : 
+                        req.ea_status === 'Rejected' || req.ea_status === 'Vetoed' ? 'w-full bg-red-500' : 
                         req.ea_status === 'Awaiting EA Vetting' ? 'w-1/2 bg-yellow-400' : 'w-1/4 bg-blue-400'
                       }`}></div>
                     </div>
@@ -227,20 +228,20 @@ export const StaffDashboard = () => {
 
                           {/* Step 2: EA Vetting */}
                           <div className="relative">
-                            <div className={`absolute -left-[20px] top-0.5 h-3.5 w-3.5 rounded-full ring-4 ring-white shadow-sm flex items-center justify-center ${
+                            <div className={`absolute -left-[20px] top-0.5 h-3.5 w-3.5 rounded-full ring-4 ring-white shadow-sm flex items-center justify-center transition-colors ${
                               req.ea_status === 'Approved' ? 'bg-green-500' :
-                              req.ea_status === 'Rejected' ? 'bg-red-500' :
+                              req.ea_status === 'Rejected' || req.ea_status === 'Vetoed' ? 'bg-red-500' :
                               'bg-yellow-400'
                             }`}>
                                {req.ea_status === 'Approved' ? <CheckCircle2 className="h-2 w-2 text-white" /> : 
-                                req.ea_status === 'Rejected' ? <AlertCircle className="h-2 w-2 text-white" /> : 
+                                req.ea_status === 'Rejected' || req.ea_status === 'Vetoed' ? <AlertCircle className="h-2 w-2 text-white" /> : 
                                 <Clock className="h-2 w-2 text-white" />}
                             </div>
                             <p className="text-[10px] font-bold text-gray-900 leading-none">EA Architectural Vetting</p>
                             <div className="flex items-center gap-2 mt-1">
-                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider ${
+                              <span className={`text-[9px] font-bold px-1.5 py-0.5 rounded uppercase tracking-wider transition-colors ${
                                 req.ea_status === 'Approved' ? 'bg-green-100 text-green-700' :
-                                req.ea_status === 'Rejected' ? 'bg-red-100 text-red-700' :
+                                req.ea_status === 'Rejected' || req.ea_status === 'Vetoed' ? 'bg-red-100 text-red-700' :
                                 'bg-yellow-100 text-yellow-700'
                               }`}>{req.ea_status}</span>
                               {req.alignment_score > 0 && (
@@ -256,7 +257,7 @@ export const StaffDashboard = () => {
 
                           {/* Step 3: PMO / Fulfillment */}
                           <div className="relative">
-                            <div className={`absolute -left-[20px] top-0.5 h-3.5 w-3.5 rounded-full ring-4 ring-white shadow-sm flex items-center justify-center ${
+                            <div className={`absolute -left-[20px] top-0.5 h-3.5 w-3.5 rounded-full ring-4 ring-white shadow-sm flex items-center justify-center transition-colors ${
                               req.status === 'Fulfilled' ? 'bg-green-500' :
                               req.ea_status === 'Approved' ? 'bg-yellow-400' :
                               'bg-gray-200'

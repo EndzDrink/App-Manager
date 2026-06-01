@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { 
   Users as UsersIcon, Search, Shield, Building2, Calendar, 
   Database, AlertCircle, ChevronDown, RefreshCw, Server, 
-  CheckCircle2, LayoutDashboard
+  CheckCircle2, LayoutDashboard, AlertTriangle
 } from "lucide-react";
 
 interface UsersTabProps {
@@ -16,10 +16,61 @@ interface UsersTabProps {
 export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigationQuery = '' }) => {
   const [searchQuery, setSearchQuery] = useState(investigationQuery);
   const [expandedUser, setExpandedUser] = useState<number | null>(null);
+  
+  // NEW: States for Reconciliation
+  const [availableSystems, setAvailableSystems] = useState<any[]>([]);
+  const [isReconciling, setIsReconciling] = useState<number | null>(null);
+
+  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
   useEffect(() => {
     setSearchQuery(investigationQuery);
   }, [investigationQuery]);
+
+  // NEW: Fetch Enterprise Catalog to populate the dropdown for broken links
+  useEffect(() => {
+    const fetchSystems = async () => {
+      try {
+        const token = localStorage.getItem('appManagerToken');
+        const res = await fetch(`${API_URL}/api/systems`, { 
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) setAvailableSystems(await res.json());
+      } catch (err) {
+        console.error("Failed to load catalog systems:", err);
+      }
+    };
+    fetchSystems();
+  }, []);
+
+  // NEW: Handle Broken Link Reconciliation
+  const handleReconcileSystem = async (userId: number, subId: number, targetSystemId: string) => {
+    if (!targetSystemId) return;
+    setIsReconciling(subId || userId);
+    
+    try {
+      const token = localStorage.getItem('appManagerToken');
+      // If the broken link comes from a subscription table join failure, we patch the subscription system_id
+      const res = await fetch(`${API_URL}/api/subscriptions/${subId}`, {
+        method: 'PUT',
+        headers: { 
+          'Content-Type': 'application/json', 
+          'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ system_id: parseInt(targetSystemId) })
+      });
+
+      if (res.ok) {
+        if (onRefresh) await onRefresh();
+      } else {
+        console.error("Failed to reconcile broken link.");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsReconciling(null);
+    }
+  };
 
   // ARMORED FILTER LOGIC: Safely parses strings and handles nulls
   const filteredUsers = users.filter(user => {
@@ -85,7 +136,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigat
             className="bg-white text-blue-900 border-gray-200 hover:bg-gray-50 font-bold shadow-sm px-3"
             title="Refresh Directory"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className={`h-4 w-4 ${isReconciling ? 'animate-spin text-blue-500' : ''}`} />
           </Button>
         </div>
       </div>
@@ -236,26 +287,50 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigat
                                       <tbody className="divide-y divide-gray-50">
                                         {assignedSystems.map((sys: any, idx: number) => {
                                           const isTarget = investigationQuery && (sys.name || '').toLowerCase().includes(investigationQuery.toLowerCase());
+                                          const isUnlinked = !sys.name || sys.name === 'Unknown' || sys.name === 'Unlinked System';
                                           
                                           return (
-                                            <tr key={idx} className={isTarget ? 'bg-red-50/30' : 'bg-white hover:bg-gray-50/50 transition-colors'}>
+                                            <tr key={idx} className={isTarget ? 'bg-red-50/30' : (isUnlinked ? 'bg-orange-50/30' : 'bg-white hover:bg-gray-50/50 transition-colors')}>
                                               <td className="py-3 px-6">
-                                                <div className="flex items-center">
-                                                  <Server className={`h-4 w-4 mr-2.5 ${isTarget ? 'text-red-500' : 'text-sky-500'}`} />
-                                                  <span className={`font-bold text-xs ${isTarget ? 'text-red-900' : 'text-gray-800'}`}>
-                                                    {sys.name || 'Unlinked System'}
-                                                  </span>
-                                                  {isTarget && (
-                                                    <span className="ml-3 bg-red-100 text-red-700 text-[9px] px-1.5 py-0.5 rounded uppercase font-black tracking-wider">
-                                                      Target
+                                                {isUnlinked ? (
+                                                  <div className="flex items-center max-w-sm">
+                                                    <AlertTriangle className="h-4 w-4 text-orange-500 mr-2 shrink-0" />
+                                                    <select 
+                                                        className="w-full text-[10px] border border-orange-300 rounded p-1.5 font-bold bg-white text-orange-900 outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer shadow-sm"
+                                                        onChange={(e) => handleReconcileSystem(user.id, sys.id, e.target.value)}
+                                                        value=""
+                                                        disabled={isReconciling === sys.id}
+                                                    >
+                                                        <option value="" disabled>{isReconciling === sys.id ? 'Reconciling Link...' : 'Fix Broken Link (Assign Catalog System)'}</option>
+                                                        {availableSystems.map(system => (
+                                                            <option key={system.id} value={system.id}>{system.name} ({system.category})</option>
+                                                        ))}
+                                                    </select>
+                                                  </div>
+                                                ) : (
+                                                  <div className="flex items-center">
+                                                    <Server className={`h-4 w-4 mr-2.5 ${isTarget ? 'text-red-500' : 'text-sky-500'}`} />
+                                                    <span className={`font-bold text-xs ${isTarget ? 'text-red-900' : 'text-gray-800'}`}>
+                                                      {sys.name}
                                                     </span>
-                                                  )}
-                                                </div>
+                                                    {isTarget && (
+                                                      <span className="ml-3 bg-red-100 text-red-700 text-[9px] px-1.5 py-0.5 rounded uppercase font-black tracking-wider">
+                                                        Target
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                )}
                                               </td>
                                               <td className="py-3 px-6 text-center">
-                                                <span className="inline-flex items-center text-[9px] font-black uppercase tracking-wider text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
-                                                  <CheckCircle2 className="h-3 w-3 mr-1" /> Active
-                                                </span>
+                                                {isUnlinked ? (
+                                                    <span className="inline-flex items-center text-[9px] font-black uppercase tracking-wider text-orange-700 bg-orange-50 border border-orange-200 px-2 py-0.5 rounded-full">
+                                                      <AlertTriangle className="h-3 w-3 mr-1" /> Orphaned
+                                                    </span>
+                                                ) : (
+                                                    <span className="inline-flex items-center text-[9px] font-black uppercase tracking-wider text-green-700 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
+                                                      <CheckCircle2 className="h-3 w-3 mr-1" /> Active
+                                                    </span>
+                                                )}
                                               </td>
                                               <td className="py-3 px-6 text-right font-black text-gray-600 text-xs">
                                                 <span className="text-gray-400 font-medium mr-1">ZAR</span>

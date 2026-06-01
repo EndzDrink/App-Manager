@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Server, Plus, ArrowLeft, ShieldAlert, CheckCircle2, Users, Filter, X, 
-  Search, Building2, Cloud, HardDrive, AlertTriangle, LayoutGrid, List, Check, Database
+  Search, Building2, Cloud, HardDrive, AlertTriangle, LayoutGrid, List, Check, Database, Lock
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
@@ -19,11 +19,12 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
   const canManageCatalog = ['SuperAdmin', 'EA', 'CIO'].includes(userRole);
   const isManager = ['SuperAdmin', 'EA', 'DepartmentHead', 'CRMHead'].includes(userRole);
 
-  // Add Form States
+  // Add Form States matching DB constraints
   const [newName, setNewName] = useState('');
   const [newCategory, setNewCategory] = useState('Productivity');
   const [newVendor, setNewVendor] = useState('');
-  const [newDeployment, setNewDeployment] = useState('External SaaS');
+  const [newDeploymentType, setNewDeploymentType] = useState('External');
+  const [newDeploymentArch, setNewDeploymentArch] = useState('SaaS');
   
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -36,30 +37,84 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
 
-  // Updated state type to allow strings (like "SYS-22")
   const [isRequesting, setIsRequesting] = useState<number | string | null>(null);
+  
+  // Semantic Triage States
+  const [justification, setJustification] = useState('');
+  const [isTriageBlocked, setIsTriageBlocked] = useState(false);
+  const [triageSuggestion, setTriageSuggestion] = useState<any | null>(null);
+  const [exceptionReason, setExceptionReason] = useState('');
+  const [selectedTriageOption, setSelectedTriageOption] = useState<'use_existing' | 'exception' | null>(null);
+
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
-  const handleRequestLicense = async (systemId: number | string) => {
-    setIsRequesting(systemId);
+  useEffect(() => {
+    if (!justification || justification.length < 10 || selectedTriageOption) {
+      setIsTriageBlocked(false);
+      setTriageSuggestion(null);
+      return;
+    }
+
+    const text = justification.toLowerCase();
     
-    // THE FIX: Strip "SYS-" prefix to ensure PostgreSQL receives a pure integer
+    const matches = apps.map(app => {
+      let score = 0;
+      if (text.includes(app.category.toLowerCase())) score += 5;
+      if (text.includes('task') || text.includes('project') || text.includes('agile')) {
+        if (app.category === 'Productivity' || app.category === 'Operations') score += 10;
+      }
+      if (text.includes('map') || text.includes('gis') || text.includes('location')) {
+        if (app.category === 'Geospatial') score += 10;
+      }
+      return { app, score };
+    }).filter(m => m.score > 0).sort((a, b) => b.score - a.score);
+
+    if (matches.length > 0 && matches[0].score >= 10 && matches[0].app.id !== selectedApp?.id) {
+      setIsTriageBlocked(true);
+      setTriageSuggestion(matches[0].app);
+    } else {
+      setIsTriageBlocked(false);
+      setTriageSuggestion(null);
+    }
+  }, [justification, apps, selectedApp, selectedTriageOption]);
+
+  const handleRequestLicense = async (systemId: number | string) => {
+    if (selectedTriageOption === 'exception' && exceptionReason.length < 10) {
+        setErrorMsg("You must provide architectural justification to bypass the enterprise standard.");
+        return;
+    }
+    
+    setIsRequesting(systemId);
     const cleanSystemId = typeof systemId === 'string' ? parseInt(systemId.replace('SYS-', ''), 10) : systemId;
 
     try {
       const token = localStorage.getItem('appManagerToken');
+      const finalJustification = selectedTriageOption === 'exception' 
+        ? `${justification} 
+
+[ARCHITECTURAL EXCEPTION]: ${exceptionReason}`
+        : justification;
+
       const res = await fetch(`${API_URL}/api/requests`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ system_id: cleanSystemId }) // Send the clean integer
+        body: JSON.stringify({ 
+            system_id: cleanSystemId,
+            justification: finalJustification
+        }) 
       });
       
       if (res.ok) {
         setSuccessMsg("Request submitted successfully. Track it on your Workspace Dashboard.");
-        setTimeout(() => setSuccessMsg(''), 3000);
+        setTimeout(() => {
+            setSuccessMsg('');
+            setJustification('');
+            setExceptionReason('');
+            setSelectedTriageOption(null);
+        }, 3000);
       } else {
         const err = await res.json();
         setErrorMsg(err.error || "Failed to request license");
@@ -90,8 +145,8 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
           name: newName, 
           functional_category: newCategory,
           vendor: newVendor || 'Internal/Unknown',
-          deployment_type: newDeployment,
-          deployment_architecture: newDeployment.includes('SaaS') ? 'Cloud' : 'On-Premise'
+          deployment_type: newDeploymentType,
+          deployment_architecture: newDeploymentArch
         })
       });
       const data = await res.json();
@@ -116,20 +171,12 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
   };
 
   const uniqueCategories = ['All', ...Array.from(new Set(apps.map(app => app.category)))].sort();
-  const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
-
-  const hasAppsForLetter = (letter: string) => {
-    return apps.some(app => 
-      app.name.charAt(0).toUpperCase() === letter && 
-      (activeCategoryFilter === 'All' || app.category === activeCategoryFilter) &&
-      (activeDeploymentFilter === 'All' || (app.deployment_type || 'External SaaS') === activeDeploymentFilter)
-    );
-  };
-
+  
   const normalizedApps = apps.map(app => ({
     ...app,
     vendor: app.vendor || 'Unknown Vendor',
-    deployment_type: app.deployment_type || 'External SaaS'
+    deployment_type: app.deployment_type || 'External',
+    deployment_architecture: app.deployment_architecture || 'SaaS'
   }));
 
   const processedApps = normalizedApps
@@ -148,11 +195,18 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
   // --- DETAILED DRILL-DOWN VIEW ---
   if (selectedApp) {
     const overlappingApps = normalizedApps.filter(a => a.category === selectedApp.category && a.id !== selectedApp.id);
-    
+    const targetSystemId = (selectedTriageOption === 'use_existing' && triageSuggestion) ? triageSuggestion.id : selectedApp.id;
+        
     return (
       <div className="animate-in fade-in slide-in-from-bottom-4 duration-500 max-w-5xl mx-auto pb-8">
         <button 
-          onClick={() => setSelectedApp(null)}
+          onClick={() => {
+              setSelectedApp(null);
+              setJustification('');
+              setIsTriageBlocked(false);
+              setTriageSuggestion(null);
+              setSelectedTriageOption(null);
+          }}
           className="flex items-center text-sm font-bold text-blue-800 hover:text-blue-900 mb-6 transition-colors"
         >
           <ArrowLeft className="h-4 w-4 mr-2" /> Back to IT Catalog
@@ -174,16 +228,19 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
           <div className="bg-sky-50 border-b border-sky-100 px-6 py-6 flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center space-x-4">
               <div className="h-14 w-14 bg-blue-900 rounded-lg flex items-center justify-center text-yellow-400 shadow-sm shrink-0">
-                {selectedApp.deployment_type === 'Internal Build' ? <HardDrive className="h-7 w-7" /> : <Cloud className="h-7 w-7" />}
+                {selectedApp.deployment_type?.includes('Internal') || selectedApp.deployment_architecture?.includes('On-Prem') ? <HardDrive className="h-7 w-7" /> : <Cloud className="h-7 w-7" />}
               </div>
               <div>
                 <h2 className="text-2xl font-black text-gray-900 tracking-tight">{selectedApp.name}</h2>
-                <div className="flex items-center gap-2 mt-1.5">
+                <div className="flex items-center gap-2 mt-1.5 flex-wrap">
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] uppercase font-bold bg-white text-blue-900 border border-sky-200 shadow-sm tracking-wider">
                     {selectedApp.category}
                   </span>
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] uppercase font-bold bg-blue-100 text-blue-800 border border-blue-200 tracking-wider">
-                    {selectedApp.deployment_type || 'External SaaS'}
+                    Type: {selectedApp.deployment_type || 'External'}
+                  </span>
+                  <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] uppercase font-bold bg-purple-100 text-purple-800 border border-purple-200 tracking-wider">
+                    Arch: {selectedApp.deployment_architecture || 'SaaS'}
                   </span>
                 </div>
               </div>
@@ -194,50 +251,98 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
                 <p className="text-[10px] text-blue-900/60 uppercase font-bold tracking-wider mb-0.5">Catalog Entry Date</p>
                 <p className="text-sm font-semibold text-blue-900">{selectedApp.created_at || 'Legacy Data'}</p>
               </div>
-              
-              {!isManager && (
-                <Button 
-                  onClick={() => handleRequestLicense(selectedApp.id)}
-                  disabled={isRequesting === selectedApp.id}
-                  className="bg-blue-900 hover:bg-blue-800 text-yellow-400 font-bold shadow-md transition-transform active:scale-95 h-10 px-6"
-                >
-                  {isRequesting === selectedApp.id ? 'Submitting...' : 'Request Access'} <Plus className="h-4 w-4 ml-2" />
-                </Button>
-              )}
             </div>
           </div>
           
           <div className="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <div>
+            {/* LEFT COLUMN: The Request Form */}
+            <div className="flex flex-col h-full">
               <h3 className="text-xs font-black text-blue-900 uppercase tracking-widest mb-4 flex items-center">
-                <Database className="h-4 w-4 mr-2 text-sky-500" /> System Metrics & Deployment
+                <Database className="h-4 w-4 mr-2 text-sky-500" /> Procurement Request Form
               </h3>
               
-              <div className="grid grid-cols-2 gap-4 mb-6">
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
-                   <p className="text-[10px] uppercase font-bold text-gray-500 tracking-wider mb-1">Total Users</p>
-                   <p className="text-2xl font-black text-gray-800">{selectedApp.active_users || 0}</p>
-                </div>
-                <div className="bg-gray-50 border border-gray-100 rounded-lg p-4">
-                   <p className="text-[10px] uppercase font-bold text-gray-500 tracking-wider mb-1">Satisfaction Score</p>
-                   <p className="text-2xl font-black text-gray-800">{selectedApp.satisfaction_score || 0}%</p>
-                </div>
-              </div>
+              {!isManager ? (
+                <div className="flex flex-col h-full bg-gray-50 border border-gray-100 p-5 rounded-xl">
+                   <label className="block text-[10px] font-bold text-gray-600 uppercase tracking-wider mb-2">
+                       Business Justification
+                   </label>
+                   <p className="text-xs text-gray-500 mb-3">Please explain why you need this software and what business tasks it will solve.</p>
+                   <textarea 
+                     className="w-full h-32 p-3 border border-gray-200 rounded-lg text-sm mb-4 outline-none focus:ring-2 focus:ring-blue-500 resize-none transition-all"
+                     placeholder="e.g. I need to track my team's project tasks and deadlines..."
+                     value={justification}
+                     onChange={(e) => setJustification(e.target.value)}
+                     disabled={selectedTriageOption === 'use_existing'}
+                   />
 
-              <h3 className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-3 flex items-center">
-                <Building2 className="h-3 w-3 mr-1.5" /> Departmental Usage
-              </h3>
-              {selectedApp.departments && selectedApp.departments.length > 0 ? (
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {selectedApp.departments.sort().map((dept: string, idx: number) => (
-                    <div key={idx} className="bg-white border border-gray-200 rounded-lg p-2.5 text-xs font-bold text-gray-700 flex items-center shadow-sm">
-                      <div className="w-1.5 h-1.5 rounded-full bg-green-500 mr-2.5 shadow-[0_0_4px_rgba(34,197,94,0.5)]"></div>
-                      <span className="truncate">{dept}</span>
-                    </div>
-                  ))}
+                   {isTriageBlocked && triageSuggestion && !selectedTriageOption && (
+                     <div className="mb-4 bg-orange-50 border-l-4 border-orange-500 p-4 rounded-r-lg shadow-sm animate-in zoom-in-95">
+                         <div className="flex items-start">
+                             <ShieldAlert className="h-5 w-5 text-orange-600 mr-3 mt-0.5 shrink-0" />
+                             <div>
+                                 <h4 className="text-sm font-black text-orange-900 tracking-tight">Procurement Blocked</h4>
+                                 <p className="text-xs text-orange-800 mt-1 mb-3">
+                                     eThekwini Municipality already holds an enterprise license for <strong className="font-black text-gray-900 bg-white px-1 py-0.5 rounded">{triageSuggestion.name}</strong>, which aligns with your stated requirements.
+                                 </p>
+                                 <div className="space-y-2">
+                                     <button 
+                                        onClick={() => setSelectedTriageOption('use_existing')}
+                                        className="w-full text-left bg-white border border-orange-200 p-2 rounded text-xs font-bold text-gray-800 hover:border-orange-400 hover:bg-orange-100/50 transition-colors"
+                                     >
+                                         <CheckCircle2 className="h-3.5 w-3.5 inline mr-1.5 text-green-600" />
+                                         I will request access to {triageSuggestion.name} instead.
+                                     </button>
+                                     <button 
+                                        onClick={() => setSelectedTriageOption('exception')}
+                                        className="w-full text-left bg-white border border-orange-200 p-2 rounded text-xs font-bold text-gray-800 hover:border-orange-400 hover:bg-orange-100/50 transition-colors"
+                                     >
+                                         <X className="h-3.5 w-3.5 inline mr-1.5 text-red-600" />
+                                         The existing tool does not meet my needs.
+                                     </button>
+                                 </div>
+                             </div>
+                         </div>
+                     </div>
+                   )}
+
+                   {selectedTriageOption === 'exception' && (
+                       <div className="mb-4 animate-in slide-in-from-top-2">
+                           <label className="block text-[10px] font-black text-red-600 uppercase tracking-wider mb-2 flex items-center">
+                               <AlertTriangle className="h-3 w-3 mr-1" /> Architectural Exception Justification
+                           </label>
+                           <textarea 
+                             className="w-full h-24 p-3 border-2 border-red-200 bg-red-50 rounded-lg text-sm outline-none focus:ring-red-500 resize-none transition-all"
+                             placeholder={`Explain why ${triageSuggestion?.name} cannot fulfill your requirement. This will be audited by the EA team.`}
+                             value={exceptionReason}
+                             onChange={(e) => setExceptionReason(e.target.value)}
+                           />
+                       </div>
+                   )}
+
+                   <div className="mt-auto pt-4 flex justify-end">
+                       <Button 
+                         onClick={() => handleRequestLicense(targetSystemId)}
+                         disabled={isRequesting === targetSystemId || (justification.length < 10) || (isTriageBlocked && !selectedTriageOption)}
+                         className={`font-bold shadow-md transition-all h-10 px-6 ${
+                             isTriageBlocked && !selectedTriageOption 
+                             ? 'bg-gray-200 text-gray-400 cursor-not-allowed border-none' 
+                             : 'bg-blue-900 hover:bg-blue-800 text-yellow-400 active:scale-95'
+                         }`}
+                       >
+                         {isRequesting === targetSystemId ? 'Submitting...' : 
+                          isTriageBlocked && !selectedTriageOption ? <><Lock className="h-4 w-4 mr-2"/> Blocked</> : 
+                          'Submit Request'}
+                       </Button>
+                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-gray-500 italic bg-gray-50 p-4 rounded-lg border border-dashed border-gray-200">No active deployments found.</p>
+                <div className="h-full flex items-center justify-center bg-gray-50 border border-gray-100 rounded-xl p-6 text-center">
+                    <div>
+                        <ShieldAlert className="h-10 w-10 text-gray-300 mx-auto mb-3" />
+                        <p className="text-sm font-bold text-gray-500">Management Account</p>
+                        <p className="text-xs text-gray-400 mt-1">Software requests must be lodged via standard user accounts.</p>
+                    </div>
+                </div>
               )}
             </div>
 
@@ -339,8 +444,8 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
               </div>
             </div>
 
-            <div className="flex flex-col md:flex-row gap-4 items-end">
-              <div className="flex-1 w-full">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+              <div className="w-full">
                 <label className="block text-[10px] font-bold text-blue-800 uppercase tracking-wider mb-1">Functional Category</label>
                 <select 
                   className="w-full border border-gray-200 rounded-md p-2.5 text-sm focus:ring-2 focus:ring-sky-500 outline-none shadow-inner bg-gray-50 cursor-pointer font-medium"
@@ -360,20 +465,38 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
                   <option value="Scheduling">Scheduling</option>
                 </select>
               </div>
-              <div className="flex-1 w-full">
-                <label className="block text-[10px] font-bold text-blue-800 uppercase tracking-wider mb-1">Deployment Architecture</label>
+              
+              <div className="w-full">
+                <label className="block text-[10px] font-bold text-blue-800 uppercase tracking-wider mb-1">Deployment Type</label>
                 <select 
                   className="w-full border border-gray-200 rounded-md p-2.5 text-sm focus:ring-2 focus:ring-sky-500 outline-none shadow-inner bg-gray-50 cursor-pointer font-medium"
-                  value={newDeployment}
-                  onChange={(e) => setNewDeployment(e.target.value)}
+                  value={newDeploymentType}
+                  onChange={(e) => setNewDeploymentType(e.target.value)}
                 >
-                  <option value="External SaaS">External SaaS (Cloud)</option>
-                  <option value="Internal Build">Internal Build (On-Premise)</option>
+                  <option value="External">External</option>
+                  <option value="External SaaS">External SaaS</option>
+                  <option value="Internal Build">Internal Build</option>
                   <option value="Hybrid Architecture">Hybrid Architecture</option>
                 </select>
               </div>
+
+              <div className="w-full">
+                <label className="block text-[10px] font-bold text-blue-800 uppercase tracking-wider mb-1">Architecture</label>
+                <select 
+                  className="w-full border border-gray-200 rounded-md p-2.5 text-sm focus:ring-2 focus:ring-sky-500 outline-none shadow-inner bg-gray-50 cursor-pointer font-medium"
+                  value={newDeploymentArch}
+                  onChange={(e) => setNewDeploymentArch(e.target.value)}
+                >
+                  <option value="SaaS">SaaS</option>
+                  <option value="Cloud">Cloud</option>
+                  <option value="On-Premise">On-Premise</option>
+                  <option value="Legacy On-Prem">Legacy On-Prem</option>
+                  <option value="Hybrid">Hybrid</option>
+                  <option value="Desktop-Sync">Desktop-Sync</option>
+                </select>
+              </div>
               
-              <Button type="submit" disabled={isSubmitting} className="w-full md:w-auto bg-blue-800 hover:bg-blue-900 text-white font-bold shadow-sm h-[42px] px-8">
+              <Button type="submit" disabled={isSubmitting} className="w-full bg-blue-800 hover:bg-blue-900 text-white font-bold shadow-sm h-[42px]">
                 {isSubmitting ? 'Verifying...' : 'Submit'}
               </Button>
             </div>
@@ -446,9 +569,10 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
                 onChange={(e) => setActiveDeploymentFilter(e.target.value)}
               >
                 <option value="All">All Types</option>
-                <option value="Internal Build">Internal</option>
-                <option value="External SaaS">External</option>
-                <option value="Hybrid Architecture">Hybrid</option>
+                <option value="External">External</option>
+                <option value="External SaaS">External SaaS</option>
+                <option value="Internal Build">Internal Build</option>
+                <option value="Hybrid Architecture">Hybrid Architecture</option>
               </select>
             </div>
 
@@ -493,7 +617,7 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
         ) : viewMode === 'grid' ? (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5 pb-8">
             {processedApps.map((app) => {
-              const isInternal = app.deployment_type === 'Internal Build';
+              const isInternal = app.deployment_type?.includes('Internal') || app.deployment_architecture?.includes('On-Prem');
               const DeploymentIcon = isInternal ? HardDrive : Cloud;
 
               return (
@@ -530,8 +654,8 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
                       <Users className="h-3 w-3 mr-1.5 text-sky-500" /> 
                       {app.departments ? app.departments.length : 0}
                     </span>
-                    <span className={`text-[9px] uppercase font-bold px-2 py-1 rounded border ${isInternal ? 'bg-green-50 text-green-700 border-green-100' : 'bg-gray-50 text-gray-500 border-gray-100'}`}>
-                      {isInternal ? 'Internal' : 'External'} 
+                    <span className={`text-[8px] uppercase font-bold px-2 py-1 rounded border truncate max-w-[100px] ${isInternal ? 'bg-green-50 text-green-700 border-green-100' : 'bg-gray-50 text-gray-500 border-gray-100'}`}>
+                      {app.deployment_type}
                     </span>
                   </div>
                 </div>
@@ -541,7 +665,7 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
         ) : (
           <div className="flex flex-col space-y-3 pb-8">
             {processedApps.map((app) => {
-              const isInternal = app.deployment_type === 'Internal Build';
+              const isInternal = app.deployment_type?.includes('Internal') || app.deployment_architecture?.includes('On-Prem');
               const DeploymentIcon = isInternal ? HardDrive : Cloud;
 
               return (
@@ -580,8 +704,8 @@ export const AppsTab: React.FC<AppsTabProps> = ({ apps, onAddApp }) => {
                           <Users className="h-3 w-3 mr-1 text-sky-500" /> {app.departments ? app.departments.length : 0}
                         </span>
                       </span>
-                      <span className={`text-[9px] uppercase font-bold px-2 py-1 rounded border h-fit mt-3 w-[70px] text-center ${isInternal ? 'bg-green-50 text-green-700 border-green-100' : 'bg-gray-50 text-gray-500 border-gray-100'}`}>
-                        {isInternal ? 'Internal' : 'External'}
+                      <span className={`text-[8px] uppercase font-bold px-2 py-1 rounded border h-fit mt-3 w-[100px] text-center truncate ${isInternal ? 'bg-green-50 text-green-700 border-green-100' : 'bg-gray-50 text-gray-500 border-gray-100'}`}>
+                        {app.deployment_type}
                       </span>
                     </div>
                   </div>

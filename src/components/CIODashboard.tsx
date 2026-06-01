@@ -1,12 +1,13 @@
-import React, { useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { MetricCard } from "@/components/MetricCard";
 import { WeeklyUsageChart } from "@/components/WeeklyUsageChart";
 import { CategoryUsageChart } from "@/components/CategoryUsageChart";
 import { 
-  Server, CreditCard, Coins, Lightbulb, TrendingUp, 
-  TrendingDown, ArrowLeftRight, DollarSign, ShieldCheck 
+  Server, CreditCard, Coins, Lightbulb, TrendingUp, ChevronRight ,
+  TrendingDown, ArrowLeftRight, DollarSign, ShieldCheck, XCircle, Search
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 
 interface CIODashboardProps {
   systems: any[];
@@ -29,16 +30,10 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
   onSaveReport, onNavigateToRecommendations
 }) => {
   
-  // ------------------------------------------------------------------
-  // DATA COMPUTATIONS
-  // ------------------------------------------------------------------
-  // Portfolio Breakdown
-  const internalCount = systems.filter(s => s.deployment_type?.includes('Internal')).length;
-  const externalCount = systems.filter(s => !s.deployment_type || s.deployment_type.includes('External')).length;
-  const hybridCount = systems.filter(s => s.deployment_type?.includes('Hybrid')).length;
-
-  // We need to fetch the request pipeline data to calculate CRM & EA metrics
-  const [pipelineData, setPipelineData] = React.useState<any[]>([]);
+  const [pipelineData, setPipelineData] = useState<any[]>([]);
+  
+  // NEW: State to track which metric filter is active on the CIO level
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
 
   React.useEffect(() => {
     const fetchPipeline = async () => {
@@ -55,27 +50,86 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
     fetchPipeline();
   }, []);
 
-  // Compute CRM Deflection Metrics (CAPEX Savings)
-  const deflectedRequests = pipelineData.filter(d => d.crm_status === 'deflected');
-  const opexSaved = deflectedRequests.reduce((sum, d) => sum + (parseFloat(String(d.estimated_cost_annual)) || 0), 0);
+  // ------------------------------------------------------------------
+  // DATA COMPUTATIONS
+  // ------------------------------------------------------------------
+  const internalCount = systems.filter(s => s.deployment_type?.includes('Internal')).length;
+  const externalCount = systems.filter(s => !s.deployment_type || s.deployment_type.includes('External')).length;
+  const hybridCount = systems.filter(s => s.deployment_type?.includes('Hybrid')).length;
+
+  const deflectedRequests = useMemo(() => pipelineData.filter(d => d.crm_status === 'deflected'), [pipelineData]);
+  const opexSaved = useMemo(() => deflectedRequests.reduce((sum, d) => sum + (parseFloat(String(d.estimated_cost_annual)) || 0), 0), [deflectedRequests]);
   
-  // Compute EA Alignment Metrics
-  const eaApproved = pipelineData.filter(d => d.ea_status === 'Approved');
-  const eaRejected = pipelineData.filter(d => d.ea_status === 'Rejected' || d.ea_status === 'Vetoed');
+  const eaApproved = useMemo(() => pipelineData.filter(d => d.ea_status === 'Approved'), [pipelineData]);
+  const eaRejected = useMemo(() => pipelineData.filter(d => d.ea_status === 'Rejected' || d.ea_status === 'Vetoed'), [pipelineData]);
   
-  // Compute Reclaimed Budget (OPEX Savings)
-  // In a real scenario, this would track historical revokes. 
-  // For the dashboard, we calculate potential savings from the AI recommendations.
-  const potentialOpexReclaim = recommendations.reduce((sum, rec) => {
+  const potentialOpexReclaim = useMemo(() => recommendations.reduce((sum, rec) => {
     const match = rec.description.match(/ZAR (\d+\.?\d*)/);
     return sum + (match ? parseFloat(match[1]) : 0);
-  }, 0);
+  }, 0), [recommendations]);
+
+  // ----------------------------------------------------------------
+  // FILTERING LOGIC FOR DRILL-DOWN REPORTING
+  // ----------------------------------------------------------------
+  const handleFilterToggle = (filterType: string) => {
+    setActiveFilter(prev => prev === filterType ? null : filterType);
+  };
+
+  // Determine what data to show in the drill-down table based on the active filter
+  const getFilteredData = () => {
+    switch(activeFilter) {
+      case 'deflected':
+        return deflectedRequests;
+      case 'ea_approved':
+        return eaApproved;
+      case 'ea_rejected':
+        return eaRejected;
+      case 'portfolio':
+        return systems;
+      case 'subscriptions':
+        return subscriptions;
+      default:
+        return [];
+    }
+  };
+
+  const filteredData = getFilteredData();
+
+  // Helper function to render a clickable metric card
+  const InteractiveMetricCard = ({ title, value, subtitle, icon, filterKey }: any) => {
+    const isActive = activeFilter === filterKey;
+    return (
+      <div 
+        onClick={() => filterKey && handleFilterToggle(filterKey)}
+        className={`cursor-pointer transition-all duration-200 h-full ${
+          isActive 
+            ? 'ring-2 ring-blue-500 scale-[1.02] shadow-md z-10 relative rounded-xl' 
+            : 'hover:scale-[1.01] hover:shadow-sm'
+        }`}
+      >
+        <MetricCard icon={icon} title={title} value={value} subtitle={subtitle} />
+        {isActive && (
+          <div className="absolute top-2 right-2 flex items-center bg-blue-100 text-blue-700 text-[9px] font-bold px-2 py-0.5 rounded-full">
+            Active Filter <XCircle className="h-3 w-3 ml-1 cursor-pointer" onClick={(e) => { e.stopPropagation(); setActiveFilter(null); }} />
+          </div>
+        )}
+      </div>
+    );
+  };
 
   return (
-    <div className="animate-in fade-in duration-500 pb-12 max-w-[1600px] mx-auto">
+    <div className="animate-in fade-in duration-500 pb-12 max-w-[1600px] mx-auto relative">
       
-      {/* 1. EXECUTIVE FINANCIAL SUMMARY (The Commercial Closer) */}
-      <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4">Executive Financial Governance</h3>
+      {/* 1. EXECUTIVE FINANCIAL SUMMARY */}
+      <div className="flex justify-between items-end mb-4">
+        <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Executive Financial Governance</h3>
+        {activeFilter && (
+          <Button variant="ghost" size="sm" onClick={() => setActiveFilter(null)} className="text-gray-500 text-xs font-bold hover:bg-gray-100 h-8">
+            Clear Active Filter
+          </Button>
+        )}
+      </div>
+
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
         <MetricCard 
           icon={<Coins className="h-5 w-5" />} 
@@ -94,19 +148,25 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
           } 
         />
 
-        <MetricCard 
+        <InteractiveMetricCard 
           icon={<DollarSign className="h-5 w-5 text-emerald-500" />} 
           title="CAPEX Deflected" 
           value={`ZAR ${(opexSaved / 1000).toFixed(1)}k`} 
           subtitle={<span className="text-emerald-600 font-bold text-[10px]">{deflectedRequests.length} redundant requests blocked</span>} 
+          filterKey="deflected"
         />
 
-        <MetricCard 
-          icon={<Lightbulb className="h-5 w-5 text-amber-500" />} 
-          title="OPEX Reclaim Target" 
-          value={`ZAR ${(potentialOpexReclaim / 1000).toFixed(1)}k`} 
-          subtitle={<span className="text-amber-600 font-bold text-[10px]">Identified across {recommendations.length} optimizations</span>} 
-        />
+        <div 
+          onClick={onNavigateToRecommendations}
+          className="cursor-pointer hover:scale-[1.01] hover:shadow-sm transition-all duration-200 h-full"
+        >
+          <MetricCard 
+            icon={<Lightbulb className="h-5 w-5 text-amber-500" />} 
+            title="OPEX Reclaim Target" 
+            value={`ZAR ${(potentialOpexReclaim / 1000).toFixed(1)}k`} 
+            subtitle={<span className="text-amber-600 font-bold text-[10px] flex items-center">Click to view {recommendations.length} optimizations <ChevronRight className="h-3 w-3 ml-0.5"/></span>} 
+          />
+        </div>
 
         <MetricCard 
           icon={<ShieldCheck className="h-5 w-5 text-blue-500" />} 
@@ -119,7 +179,7 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
       {/* 2. PORTFOLIO & OPERATIONAL METRICS */}
       <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4 mt-8 border-t border-gray-200 pt-6">Portfolio Operations</h3>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <MetricCard 
+        <InteractiveMetricCard 
           icon={<Server className="h-5 w-5" />} 
           title="IT Portfolio" 
           value={biSystemFilter === "All" ? systems.length.toString() : "1"} 
@@ -132,13 +192,15 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
                 </div>
               : "Isolated View"
           } 
+          filterKey="portfolio"
         />
         
-        <MetricCard 
+        <InteractiveMetricCard 
           icon={<CreditCard className="h-5 w-5" />} 
           title="Active Licenses" 
           value={subscriptions.length.toString()} 
           subtitle={biSystemFilter === "All" ? "Provisioned enterprise seats" : `Seats for ${biSystemFilter}`} 
+          filterKey="subscriptions"
         />
 
         <Card className="p-5 bg-white border border-gray-200 shadow-sm flex flex-col justify-center">
@@ -151,20 +213,133 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
             </div>
           </div>
           <div className="flex gap-4 mt-2">
-             <div className="flex-1 bg-green-50 rounded-lg p-2 border border-green-100 text-center">
+             <div 
+               onClick={() => handleFilterToggle('ea_approved')}
+               className={`flex-1 rounded-lg p-2 border text-center cursor-pointer transition-all duration-200 ${activeFilter === 'ea_approved' ? 'bg-green-100 border-green-400 ring-2 ring-green-500 scale-105' : 'bg-green-50 border-green-100 hover:bg-green-100'}`}
+             >
                <p className="text-[10px] font-black text-green-700 uppercase tracking-widest mb-0.5">Approved</p>
                <p className="text-xl font-black text-green-800">{eaApproved.length}</p>
              </div>
-             <div className="flex-1 bg-red-50 rounded-lg p-2 border border-red-100 text-center">
+             <div 
+               onClick={() => handleFilterToggle('ea_rejected')}
+               className={`flex-1 rounded-lg p-2 border text-center cursor-pointer transition-all duration-200 ${activeFilter === 'ea_rejected' ? 'bg-red-100 border-red-400 ring-2 ring-red-500 scale-105' : 'bg-red-50 border-red-100 hover:bg-red-100'}`}
+             >
                <p className="text-[10px] font-black text-red-700 uppercase tracking-widest mb-0.5">Vetoed</p>
                <p className="text-xl font-black text-red-800">{eaRejected.length}</p>
              </div>
           </div>
         </Card>
       </div>
+
+      {/* DRILL-DOWN REPORTING TABLE (Renders conditionally if a filter is active) */}
+      {activeFilter && (
+        <div className="mb-8 animate-in slide-in-from-top-4 duration-300">
+          <Card className="bg-white border border-blue-200 shadow-lg flex flex-col overflow-hidden ring-1 ring-blue-100">
+            <div className="p-4 border-b border-blue-100 bg-blue-50/80 flex justify-between items-center">
+              <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider flex items-center">
+                <Search className="h-4 w-4 mr-2 text-blue-600" />
+                Drill-Down Report: <span className="ml-2 text-blue-700">{
+                  activeFilter === 'deflected' ? 'Deflected CAPEX Requests' :
+                  activeFilter === 'ea_approved' ? 'Architecturally Approved Spend' :
+                  activeFilter === 'ea_rejected' ? 'Architecturally Vetoed Spend' :
+                  activeFilter === 'portfolio' ? 'Enterprise IT Catalog' :
+                  activeFilter === 'subscriptions' ? 'Active Enterprise Licenses' : ''
+                }</span>
+              </h3>
+              <Button size="sm" variant="ghost" onClick={() => setActiveFilter(null)} className="h-8 w-8 p-0 text-blue-800 hover:bg-blue-200">
+                <XCircle className="h-5 w-5" />
+              </Button>
+            </div>
+            
+            <div className="max-h-[400px] overflow-auto custom-scrollbar p-0">
+              <table className="w-full text-left border-collapse">
+                <thead className="sticky top-0 bg-white shadow-sm z-10">
+                  <tr className="text-[10px] uppercase tracking-wider text-gray-500 border-b border-gray-200 bg-gray-50/80 backdrop-blur-sm">
+                    {/* Dynamic Headers based on data type */}
+                    {(activeFilter === 'deflected' || activeFilter.startsWith('ea_')) && (
+                      <>
+                        <th className="py-3 px-6 font-bold">Request Ref</th>
+                        <th className="py-3 px-4 font-bold">Target System</th>
+                        <th className="py-3 px-4 font-bold">Requesting Dept</th>
+                        <th className="py-3 px-4 font-bold text-right">Financial Impact</th>
+                      </>
+                    )}
+                    {activeFilter === 'portfolio' && (
+                      <>
+                        <th className="py-3 px-6 font-bold">System Name</th>
+                        <th className="py-3 px-4 font-bold">Vendor</th>
+                        <th className="py-3 px-4 font-bold">Category</th>
+                        <th className="py-3 px-4 font-bold">Deployment</th>
+                      </>
+                    )}
+                    {activeFilter === 'subscriptions' && (
+                      <>
+                        <th className="py-3 px-6 font-bold">System</th>
+                        <th className="py-3 px-4 font-bold">Assigned User</th>
+                        <th className="py-3 px-4 font-bold">Department</th>
+                        <th className="py-3 px-4 font-bold text-right">Monthly Cost</th>
+                      </>
+                    )}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {filteredData.map((row: any, i: number) => (
+                    <tr key={row.id || i} className="hover:bg-blue-50/30 transition-colors">
+                      {/* Dynamic Row Rendering */}
+                      {(activeFilter === 'deflected' || activeFilter.startsWith('ea_')) && (
+                        <>
+                          <td className="py-3 px-6 font-bold text-sm text-gray-900">{row.id}</td>
+                          <td className="py-3 px-4 font-medium text-gray-700">{row.system || row.system_name}</td>
+                          <td className="py-3 px-4">
+                            <span className="text-[10px] font-bold text-gray-600 bg-gray-100 px-2 py-1 rounded">
+                              {row.dept || row.department || 'Unknown'}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-right font-black text-gray-800">
+                            ZAR {parseFloat(row.estimated_cost_annual || 0).toLocaleString()}
+                          </td>
+                        </>
+                      )}
+                      {activeFilter === 'portfolio' && (
+                        <>
+                          <td className="py-3 px-6 font-bold text-sm text-gray-900">{row.name}</td>
+                          <td className="py-3 px-4 font-medium text-gray-700">{row.vendor}</td>
+                          <td className="py-3 px-4">
+                            <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded border border-blue-100">
+                              {row.category}
+                            </span>
+                          </td>
+                          <td className="py-3 px-4 text-xs font-bold text-gray-500 uppercase">{row.deployment_type || 'Unknown'}</td>
+                        </>
+                      )}
+                      {activeFilter === 'subscriptions' && (
+                        <>
+                          <td className="py-3 px-6 font-bold text-sm text-gray-900">{row.name}</td>
+                          <td className="py-3 px-4 font-medium text-gray-700">{row.user?.email || 'Unassigned'}</td>
+                          <td className="py-3 px-4 text-xs font-medium text-gray-600">{row.owningDept || row.owning_dept || 'Unknown'}</td>
+                          <td className="py-3 px-4 text-right font-black text-gray-800">
+                            ZAR {parseFloat(row.price || row.monthly_cost || 0).toLocaleString()}
+                          </td>
+                        </>
+                      )}
+                    </tr>
+                  ))}
+                  {filteredData.length === 0 && (
+                    <tr>
+                      <td colSpan={4} className="py-12 text-center text-gray-400 font-bold text-sm">
+                        No data available for this metric.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </Card>
+        </div>
+      )}
       
       {/* 3. ANALYTICS CHARTS */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch mt-8 border-t border-gray-200 pt-6">
+      <div className={`grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch ${activeFilter ? 'opacity-50 pointer-events-none filter blur-[1px] transition-all' : 'transition-all'}`}>
         <div className="flex flex-col h-full min-h-[450px] w-full">
           <WeeklyUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} onSaveReport={onSaveReport} />
         </div>

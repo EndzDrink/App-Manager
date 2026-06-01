@@ -539,6 +539,29 @@ app.delete('/api/subscriptions/:id', authenticateToken, async (req, res) => {
   }
 });
 
+app.put('/api/subscriptions/:id/transfer', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { new_department } = req.body;
+  
+  try {
+    // 1. Find the department ID for the new department name
+    const deptRes = await pool.query('SELECT id FROM departments WHERE name = $1', [new_department]);
+    if (deptRes.rowCount === 0) return res.status(404).json({ error: "Department not found." });
+    
+    const newDeptId = deptRes.rows[0].id;
+
+    // 2. Perform the transfer (update the owning_department_id)
+    await pool.query(
+      'UPDATE active_subscriptions SET owning_department_id = $1 WHERE id = $2',
+      [newDeptId, id]
+    );
+
+    res.json({ success: true, message: "License successfully transferred." });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // --- 8. RECOMMENDATIONS & INSIGHTS ---
 app.get('/api/recommendations', authenticateToken, async (req, res) => {
   try {
