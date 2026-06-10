@@ -750,7 +750,6 @@ app.get('/api/requests/me', authenticateToken, async (req, res) => {
   }
 });
 
-// UPDATED TO MATCH REQUIRED SEAM ARCHITECTURE SCHEMA
 app.get('/api/requests', authenticateToken, async (req, res) => {
   try {
     let query = `
