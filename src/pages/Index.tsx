@@ -141,7 +141,6 @@ const escapeCsv = (value: unknown): string => {
 // 4. RBAC NAVIGATION MATRIX
 // ------------------------------------------------------------------
 const NAV_ITEMS: NavItem[] = [
-  // FIXED: Added StandardUser to the roles array for Dashboard
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead', 'StandardUser'] },
   { id: 'systems', label: 'Enterprise Catalog', icon: Server, roles: ['StandardUser', 'DepartmentHead', 'SuperAdmin', 'EA', 'CIO', 'PMOLead', 'ApplicationsHead', 'NetworksHead', 'CRMHead'] },
   { id: 'subscriptions', label: 'Subscriptions', icon: CreditCard, roles: ['SuperAdmin', 'EA', 'CIO', 'DepartmentHead', 'PMOLead'] },
@@ -162,7 +161,6 @@ const EA_STRATEGY_ROLES: AppRole[] = ['SuperAdmin', 'EA'];
 // 5. COMPONENT
 // ------------------------------------------------------------------
 const Index = () => {
-  // --- Auth State (lazy init) ---
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('appManagerToken'));
   const [role, setRole] = useState<AppRole>(() => parseRole(localStorage.getItem('appManagerRole')));
   const [userDepartmentId, setUserDepartmentId] = useState<number | null>(() => {
@@ -171,7 +169,6 @@ const Index = () => {
   });
 
   // --- UI State ---
-  // FIXED: activeTab defaults to dashboard for everyone now
   const [activeTab, setActiveTab] = useState('dashboard');
   const [isLiveMode, setIsLiveMode] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
@@ -312,7 +309,7 @@ const Index = () => {
     setRole(parseRole(newRole));
     if (deptId) setUserDepartmentId(deptId);
 
-    setActiveTab('dashboard'); // Enforce everyone lands on the dashboard
+    setActiveTab('dashboard'); 
   }, []);
 
   const fetchWithAuth = async (endpoint: string, options: RequestInit = {}) => {

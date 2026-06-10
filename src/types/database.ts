@@ -18,7 +18,6 @@ export interface Subscription {
   billing_cycle: 'monthly' | 'yearly';
   status: 'active' | 'unused' | 'cancelled';
   renewal_date: string;
-  // Joined data for the UI
   app?: App;
 }
 

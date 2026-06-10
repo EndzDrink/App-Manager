@@ -91,7 +91,7 @@ const initializeSystems = async () => {
       );
     `);
 
-    // 5. CRM & EA Requests (HARDENED WITH CASCADE & NEW FIELDS)
+    // 5. CRM & EA Requests (HARDENED WITH STORAGE GAP FIELDS)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS license_requests (
         id SERIAL PRIMARY KEY,
@@ -108,6 +108,8 @@ const initializeSystems = async () => {
         estimated_users INTEGER DEFAULT 1,
         estimated_cost_annual DECIMAL DEFAULT 0.00,
         justification TEXT,
+        exception_justification TEXT,
+        aligned_domains JSONB DEFAULT '[]',
         request_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
@@ -119,7 +121,9 @@ const initializeSystems = async () => {
       { name: 'required_capabilities', type: "JSONB DEFAULT '[]'" },
       { name: 'estimated_users', type: 'INTEGER DEFAULT 1' },
       { name: 'estimated_cost_annual', type: 'DECIMAL DEFAULT 0.00' },
-      { name: 'justification', type: 'TEXT' }
+      { name: 'justification', type: 'TEXT' },
+      { name: 'exception_justification', type: 'TEXT' },
+      { name: 'aligned_domains', type: "JSONB DEFAULT '[]'" }
     ];
     for (const col of reqColumns) {
       await pool.query(`ALTER TABLE license_requests ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
@@ -138,7 +142,7 @@ const initializeSystems = async () => {
       );
     `);
 
-    // 7. Usage Logs (HARDENED WITH CASCADE)
+    // 7. Usage Logs (HARDENED WITH TIME-STAMP FOR AUDIT TIMELINES)
     await pool.query(`
       CREATE TABLE IF NOT EXISTS usage_logs (
         id SERIAL PRIMARY KEY,
@@ -146,9 +150,11 @@ const initializeSystems = async () => {
         app_id INTEGER REFERENCES enterprise_systems(id) ON DELETE CASCADE,
         action TEXT,
         duration_minutes INTEGER DEFAULT 0,
-        log_date DATE DEFAULT CURRENT_DATE
+        log_date DATE DEFAULT CURRENT_DATE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
 
     const columnsToEnsure = [
       { name: 'provider_name', type: 'VARCHAR(255)' },
@@ -239,6 +245,7 @@ app.post('/api/auth/login', async (req, res) => {
     res.json({ 
       token, 
       user: { 
+        id: result.rows[0].id,
         email: result.rows[0].email, 
         role: result.rows[0].role,
         deptId: result.rows[0].department_id 
@@ -298,7 +305,12 @@ app.get('/api/metrics/departmental-spend', authenticateToken, async (req, res) =
     query += ' GROUP BY d.id, d.name, d.allocated_budget ORDER BY total_spend DESC';
 
     const r = await pool.query(query, params);
-    res.json(r.rows);
+    const structuralData = r.rows.map(row => ({
+      ...row,
+      total_spend: parseFloat(row.total_spend || 0),
+      budget_limit: parseFloat(row.budget_limit || 0)
+    }));
+    res.json(structuralData);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -341,11 +353,9 @@ app.get('/api/systems', authenticateToken, async (req, res) => {
       s.satisfaction_score
     `;
 
-    // Only include capabilities array and architecture info if requested or mapping everything
     if (includeCapabilities) {
       selectFields += `, s.capabilities`;
     } else {
-       // Append legacy fields for existing UI components
        selectFields += `, s.deployment_architecture as architecture, s.created_at, s.deployment_type, s.lifecycle_status`;
     }
 
@@ -377,7 +387,6 @@ app.post('/api/systems', authenticateToken, async (req, res) => {
     );
     res.json({ success: true, system: result.rows[0] });
   } catch (err) { 
-    console.error("❌ Failed to add system:", err.message);
     res.status(500).json({ error: err.message }); 
   }
 });
@@ -450,6 +459,7 @@ app.get('/api/subscriptions', authenticateToken, async (req, res) => {
 
 app.post('/api/subscriptions', authenticateToken, async (req, res) => {
   const { system_id, department_id, assigned_user_id, monthly_cost, associated_project } = req.body;
+  const operatorId = req.user.id || null;
   
   try {
     await pool.query('BEGIN');
@@ -457,10 +467,10 @@ app.post('/api/subscriptions', authenticateToken, async (req, res) => {
     let fulfilledUsers = [];
 
     if (assigned_user_id) {
-      const result = await pool.query(
+      await pool.query(
         `INSERT INTO active_subscriptions 
          (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked) 
-         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, FALSE) RETURNING *`,
+         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, FALSE)`,
         [system_id, department_id || 1, assigned_user_id, monthly_cost || 0, associated_project || 'Operational']
       );
       
@@ -501,9 +511,16 @@ app.post('/api/subscriptions', authenticateToken, async (req, res) => {
       }
     }
 
+    // TELEMETRY REFRESH LOGIC & AUDIT ENFORCEMENT
+    await pool.query(
+      `INSERT INTO usage_logs (user_id, app_id, action) VALUES ($1, $2, $3)`,
+      [operatorId, system_id, `PROCUREMENT: New software license allocation for system ID ${system_id} explicitly provisioned and assigned.`]
+    );
+
     await pool.query('COMMIT');
     res.json({ 
       success: true, 
+      triggerTelemetryUpdate: true,
       message: fulfilledUsers.length > 0 
         ? `Procured and auto-fulfilled ${fulfilledUsers.length} pending staff requests.` 
         : `License procured and added to department pool.` 
@@ -517,6 +534,7 @@ app.post('/api/subscriptions', authenticateToken, async (req, res) => {
 
 app.delete('/api/subscriptions/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
+  const operatorId = req.user.id || null;
   
   try {
     let query = 'UPDATE active_subscriptions SET is_revoked = TRUE WHERE id = $1';
@@ -532,8 +550,14 @@ app.delete('/api/subscriptions/:id', authenticateToken, async (req, res) => {
     if (result.rowCount === 0) {
         return res.status(403).json({ error: "Access Denied: You cannot revoke subscriptions outside your departmental budget." });
     }
+
+    // AUDIT LOG INTEGRITY
+    await pool.query(
+      `INSERT INTO usage_logs (user_id, action) VALUES ($1, $2)`,
+      [operatorId, `RECONCILIATION: Subscription entry ID ${id} explicitly revoked to reclaim allocated budget allocations.`]
+    );
     
-    res.json({ success: true });
+    res.json({ success: true, triggerTelemetryUpdate: true });
   } catch (err) { 
     res.status(500).json({ error: err.message }); 
   }
@@ -544,20 +568,74 @@ app.put('/api/subscriptions/:id/transfer', authenticateToken, async (req, res) =
   const { new_department } = req.body;
   
   try {
-    // 1. Find the department ID for the new department name
     const deptRes = await pool.query('SELECT id FROM departments WHERE name = $1', [new_department]);
     if (deptRes.rowCount === 0) return res.status(404).json({ error: "Department not found." });
     
     const newDeptId = deptRes.rows[0].id;
 
-    // 2. Perform the transfer (update the owning_department_id)
     await pool.query(
       'UPDATE active_subscriptions SET owning_department_id = $1 WHERE id = $2',
       [newDeptId, id]
     );
 
-    res.json({ success: true, message: "License successfully transferred." });
+    res.json({ success: true, triggerTelemetryUpdate: true, message: "License successfully transferred." });
   } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// --- 7b. GOVERNANCE REALLOCATION & ASSIGNMENT ENGINE ---
+// Handles mapping unassigned, pooled, or orphaned assets to specific departments and personnel
+app.put('/api/subscriptions/:id/assign', authenticateToken, async (req, res) => {
+  const { id } = req.params;
+  const { department_id, assigned_user_id, associated_project } = req.body;
+  const operatorId = req.user.id || null;
+
+  try {
+    await pool.query('BEGIN');
+
+    // 1. Verify the subscription row exists
+    const subCheck = await pool.query('SELECT * FROM active_subscriptions WHERE id = $1', [id]);
+    if (subCheck.rowCount === 0) {
+      await pool.query('ROLLBACK');
+      return res.status(404).json({ error: "Subscription asset target not found." });
+    }
+
+    // 2. Execute dynamic assignment update
+    const result = await pool.query(
+      `UPDATE active_subscriptions 
+       SET 
+         owning_department_id = COALESCE($1, owning_department_id),
+         assigned_user_id = COALESCE($2, assigned_user_id),
+         associated_project = COALESCE($3, associated_project)
+       WHERE id = $4
+       RETURNING *`,
+      [
+        department_id ? parseInt(department_id) : null,
+        assigned_user_id ? parseInt(assigned_user_id) : null,
+        associated_project || null,
+        id
+      ]
+    );
+
+    // 3. Log action to the Auditor's Compliance Ledger
+    await pool.query(
+      `INSERT INTO usage_logs (user_id, action) VALUES ($1, $2)`,
+      [
+        operatorId, 
+        `RECONCILIATION: Asset ID ${id} successfully mapped and allocated to Dept ID ${department_id || 'Unchanged'} / User ID ${assigned_user_id || 'Pool'}.`
+      ]
+    );
+
+    await pool.query('COMMIT');
+    res.json({ 
+      success: true, 
+      triggerTelemetryUpdate: true, 
+      message: "Asset successfully assigned and integrated into structural tracking.",
+      subscription: result.rows[0]
+    });
+  } catch (err) {
+    await pool.query('ROLLBACK');
     res.status(500).json({ error: err.message });
   }
 });
@@ -580,7 +658,7 @@ app.get('/api/recommendations', authenticateToken, async (req, res) => {
 
     const r = await pool.query(query, params);
     const recommendations = r.rows.map(row => ({
-      id: row.id, title: `Optimize ${row.name}`, description: `Potential monthly saving of ZAR ${row.monthly_cost} identified.`, impact: "High"
+      id: row.id, title: `Optimize ${row.name}`, description: `Potential monthly saving of ZAR ${parseFloat(row.monthly_cost || 0).toLocaleString()} identified.`, impact: "High"
     }));
     res.json(recommendations);
   } catch (err) { res.json([]); }
@@ -593,7 +671,7 @@ app.get('/api/ai/insights', authenticateToken, async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// --- 9. MISC, AUDIT & CONNECTORS ---
+// --- 9. CONFIGURATION & COMPLIANCE LOG ENDPOINTS ---
 app.get('/api/settings', authenticateToken, async (req, res) => {
   try {
     const r = await pool.query('SELECT monthly_budget FROM settings LIMIT 1');
@@ -603,10 +681,42 @@ app.get('/api/settings', authenticateToken, async (req, res) => {
 
 app.put('/api/settings', authenticateToken, async (req, res) => {
   const { monthly_budget } = req.body;
+  const operatorId = req.user.id || null;
   try {
-    await pool.query('UPDATE settings SET monthly_budget = $1 WHERE id = 1', [monthly_budget]);
-    res.json({ success: true });
+    const cleanBudget = parseFloat(String(monthly_budget).replace(/,/g, ''));
+    if (isNaN(cleanBudget) || cleanBudget < 0) {
+      return res.status(400).json({ error: "Invalid budget field structure provided." });
+    }
+
+    await pool.query('UPDATE settings SET monthly_budget = $1 WHERE id = 1', [cleanBudget]);
+
+    // CHRONOLOGICAL COMPLIANCE ENGINE AUDIT LOGGING
+    await pool.query(
+      `INSERT INTO usage_logs (user_id, action) VALUES ($1, $2)`,
+      [operatorId, `GOVERNANCE: Global monthly budget threshold limit explicitly updated to ZAR ${cleanBudget.toLocaleString()}.`]
+    );
+
+    res.json({ success: true, triggerTelemetryUpdate: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// THE COMPLIANCE AUDITOR TIMELINE INTERFACE
+app.get('/api/audit/logs', authenticateToken, async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        ul.id, 
+        ul.action, 
+        TO_CHAR(ul.created_at, 'YYYY-MM-DD HH24:MI:SS') as timestamp, 
+        COALESCE(au.email, 'SYSTEM_AUTOMATION') as operator
+      FROM usage_logs ul 
+      LEFT JOIN admin_users au ON ul.user_id = au.id 
+      ORDER BY ul.created_at DESC, ul.id DESC
+    `);
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.get('/api/audit/duplication', authenticateToken, async (req, res) => {
@@ -637,7 +747,12 @@ app.get('/api/departments/:id/details', authenticateToken, async (req, res) => {
       pool.query(`SELECT SUM(monthly_cost) as total FROM active_subscriptions WHERE owning_department_id = $1 AND is_revoked IS NOT TRUE`, [id])
     ]);
 
-    res.json({ department: deptRes.rows[0], users: usersRes.rows, apps: appsRes.rows, totalSpend: parseFloat(spendRes.rows[0].total || 0) });
+    res.json({ 
+      department: deptRes.rows[0], 
+      users: usersRes.rows, 
+      apps: appsRes.rows, 
+      totalSpend: parseFloat(spendRes.rows[0].total || 0) 
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -645,9 +760,7 @@ app.get('/api/connectors', authenticateToken, async (req, res) => {
   try {
     const r = await pool.query('SELECT id, provider_name, api_endpoint, status, last_sync FROM data_connectors ORDER BY id DESC');
     res.json(r.rows);
-  } catch (err) { 
-    res.json([]); 
-  }
+  } catch (err) { res.json([]); }
 });
 
 app.post('/api/connectors', authenticateToken, async (req, res) => {
@@ -661,9 +774,7 @@ app.post('/api/connectors', authenticateToken, async (req, res) => {
       [provider_name, api_endpoint, api_key]
     );
     res.json({ success: true });
-  } catch (err) { 
-    res.status(500).json({ error: err.message }); 
-  }
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // --- 10. EA GOVERNANCE, PMO & CRM PIPELINES ---
@@ -673,25 +784,26 @@ app.post('/api/pmo/escalate', authenticateToken, async (req, res) => {
 
   try {
     await pool.query(
-      `INSERT INTO usage_logs (user_id, app_id, action, duration_minutes, log_date) 
-       VALUES ($1, $2, $3, $4, CURRENT_DATE)`,
+      `INSERT INTO usage_logs (user_id, app_id, action, duration_minutes) 
+       VALUES ($1, $2, $3, $4)`,
       [userId, null, `ESCALATION: Project ${project_id} - ${reason || 'Funding Bottleneck'}`, 0]
     );
-    res.json({ success: true, message: "Escalated to CIO successfully." });
+    res.json({ success: true, triggerTelemetryUpdate: true, message: "Escalated to CIO successfully." });
   } catch (err) {
     res.status(500).json({ error: "Escalation failed: " + err.message });
   }
 });
 
+// PERSISTENCE ALIGNMENT: SAVING EXCEPTIONS & ARCHITECTURAL DOMAINS
 app.post('/api/requests', authenticateToken, async (req, res) => {
-  const { system_id, category, required_capabilities, estimated_users, estimated_cost_annual, justification } = req.body;
+  const { system_id, category, required_capabilities, estimated_users, estimated_cost_annual, justification, exception_justification, aligned_domains } = req.body;
   const userId = req.user.id || 1; 
 
   try {
     const result = await pool.query(
       `INSERT INTO license_requests 
-       (user_id, system_id, status, crm_status, ea_status, category, required_capabilities, estimated_users, estimated_cost_annual, justification, request_date) 
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, CURRENT_TIMESTAMP) RETURNING id`,
+       (user_id, system_id, status, crm_status, ea_status, category, required_capabilities, estimated_users, estimated_cost_annual, justification, exception_justification, aligned_domains, request_date) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP) RETURNING id`,
       [
         userId, 
         system_id, 
@@ -702,7 +814,9 @@ app.post('/api/requests', authenticateToken, async (req, res) => {
         JSON.stringify(required_capabilities || []), 
         estimated_users || 1, 
         estimated_cost_annual || 0.00, 
-        justification || ''
+        justification || '',
+        exception_justification || '',
+        JSON.stringify(aligned_domains || [])
       ]
     );
     res.json({ success: true, message: "Request queued for CRM vetting.", id: `REQ-${result.rows[0].id}` });
@@ -711,7 +825,6 @@ app.post('/api/requests', authenticateToken, async (req, res) => {
   }
 });
 
-// CRM Escalation Endpoint
 app.put('/api/requests/:id/escalate', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const cleanId = id.replace('REQ-', '');
@@ -721,7 +834,6 @@ app.put('/api/requests/:id/escalate', authenticateToken, async (req, res) => {
   }
 
   try {
-    // Update the pipeline: CRM is done, EA is now up.
     await pool.query(
       `UPDATE license_requests 
        SET crm_status = 'Escalated to EA', ea_status = 'Awaiting EA Vetting' 
@@ -738,7 +850,7 @@ app.get('/api/requests/me', authenticateToken, async (req, res) => {
   const userId = req.user.id || 1; 
   try {
     const r = await pool.query(`
-      SELECT 'REQ-' || lr.id::text as id, es.name as system_name, lr.status, lr.ea_status, lr.alignment_score, lr.ea_comments, lr.request_date
+      SELECT 'REQ-' || lr.id::text as id, es.name as system_name, lr.status, lr.ea_status, lr.alignment_score, lr.ea_comments, lr.request_date, lr.exception_justification, lr.aligned_domains
       FROM license_requests lr
       JOIN enterprise_systems es ON lr.system_id = es.id
       WHERE lr.user_id = $1
@@ -763,6 +875,8 @@ app.get('/api/requests', authenticateToken, async (req, res) => {
         lr.estimated_users,
         lr.estimated_cost_annual,
         lr.justification,
+        lr.exception_justification,
+        lr.aligned_domains,
         lr.crm_status,
         lr.crm_deflection_score,
         lr.ea_status,
@@ -788,13 +902,19 @@ app.get('/api/requests', authenticateToken, async (req, res) => {
   }
 });
 
+// REAL-WORLD AUTHENTICATION GUARDING: ROLE VALIDATION
 app.put('/api/requests/:id/vetting', authenticateToken, async (req, res) => {
   const { id } = req.params;
   const cleanId = id.replace('REQ-', '');
   const { alignment_score, ea_status, ea_comments, crm_status, crm_deflection_score } = req.body;
 
+  // Strict Security Isolation Guardrail
+  if ((ea_status !== undefined || alignment_score !== undefined || ea_comments !== undefined) && !['SuperAdmin', 'EA'].includes(req.user.role)) {
+    return res.status(403).json({ error: "Access Denied: Architectural assessment and vetting capability is strictly restricted to EA officers." });
+  }
+
   if (!['SuperAdmin', 'EA', 'DepartmentHead', 'CRMHead'].includes(req.user.role)) {
-    return res.status(403).json({ error: "Access Denied: You do not have vetting clearance." });
+    return res.status(403).json({ error: "Access Denied: You do not have validation vetting clearance structural permissions." });
   }
 
   try {
@@ -811,13 +931,13 @@ app.put('/api/requests/:id/vetting', authenticateToken, async (req, res) => {
     if (crm_status !== undefined) { updateFields.push(`crm_status = $${paramIndex++}`); params.push(crm_status); }
     if (crm_deflection_score !== undefined) { updateFields.push(`crm_deflection_score = $${paramIndex++}`); params.push(crm_deflection_score); }
 
-    if (updateFields.length === 0) return res.status(400).json({ error: "No valid update fields provided." });
+    if (updateFields.length === 0) return res.status(400).json({ error: "No valid operational update elements provided." });
 
     params.push(cleanId);
     const query = `UPDATE license_requests SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`;
     
     await pool.query(query, params);
-    res.json({ success: true, message: `Request successfully updated.` });
+    res.json({ success: true, triggerTelemetryUpdate: true, message: `Request updated successfully.` });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
