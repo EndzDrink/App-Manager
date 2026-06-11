@@ -20,6 +20,7 @@ interface CIODashboardProps {
   biSystemFilter: string;
   biUnitFilter: string;
   biDeptFilter: string;
+  visibleWidgets?: string[];
   onSaveReport: (filename: string, content: string) => void;
   onNavigateToRecommendations: () => void;
 }
@@ -27,12 +28,11 @@ interface CIODashboardProps {
 export const CIODashboard: React.FC<CIODashboardProps> = ({
   systems, subscriptions, monthlyCost, percentUsed, costColor, trends, 
   recommendations, biSystemFilter, biUnitFilter, biDeptFilter, 
+  visibleWidgets = ['financial', 'portfolio', 'usage', 'category'], // Fallback if undefined
   onSaveReport, onNavigateToRecommendations
 }) => {
   
   const [pipelineData, setPipelineData] = useState<any[]>([]);
-  
-  // NEW: State to track which metric filter is active on the CIO level
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
 
   React.useEffect(() => {
@@ -75,27 +75,19 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
     setActiveFilter(prev => prev === filterType ? null : filterType);
   };
 
-  // Determine what data to show in the drill-down table based on the active filter
   const getFilteredData = () => {
     switch(activeFilter) {
-      case 'deflected':
-        return deflectedRequests;
-      case 'ea_approved':
-        return eaApproved;
-      case 'ea_rejected':
-        return eaRejected;
-      case 'portfolio':
-        return systems;
-      case 'subscriptions':
-        return subscriptions;
-      default:
-        return [];
+      case 'deflected': return deflectedRequests;
+      case 'ea_approved': return eaApproved;
+      case 'ea_rejected': return eaRejected;
+      case 'portfolio': return systems;
+      case 'subscriptions': return subscriptions;
+      default: return [];
     }
   };
 
   const filteredData = getFilteredData();
 
-  // Helper function to render a clickable metric card
   const InteractiveMetricCard = ({ title, value, subtitle, icon, filterKey }: any) => {
     const isActive = activeFilter === filterKey;
     return (
@@ -117,119 +109,132 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
     );
   };
 
+  // Determine grid layout for analytics charts based on visibility
+  const showUsage = visibleWidgets?.includes('usage');
+  const showCategory = visibleWidgets?.includes('category');
+  const chartsGridCols = (showUsage && showCategory) ? 'lg:grid-cols-2' : 'lg:grid-cols-1';
+
   return (
     <div className="animate-in fade-in duration-500 pb-12 max-w-[1600px] mx-auto relative">
       
       {/* 1. EXECUTIVE FINANCIAL SUMMARY */}
-      <div className="flex justify-between items-end mb-4">
-        <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Executive Financial Governance</h3>
-        {activeFilter && (
-          <Button variant="ghost" size="sm" onClick={() => setActiveFilter(null)} className="text-gray-500 text-xs font-bold hover:bg-gray-100 h-8">
-            Clear Active Filter
-          </Button>
-        )}
-      </div>
+      {visibleWidgets?.includes('financial') && (
+        <div className="animate-in fade-in duration-300">
+          <div className="flex justify-between items-end mb-4">
+            <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest">Executive Financial Governance</h3>
+            {activeFilter && (
+              <Button variant="ghost" size="sm" onClick={() => setActiveFilter(null)} className="text-gray-500 text-xs font-bold hover:bg-gray-100 h-8">
+                Clear Active Filter
+              </Button>
+            )}
+          </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <MetricCard 
-          icon={<Coins className="h-5 w-5" />} 
-          title={biSystemFilter === "All" && biUnitFilter === "All" ? "Total Burn" : "Filtered Burn"} 
-          value={`ZAR ${monthlyCost.toFixed(2)}`} 
-          subtitle={
-            <div className="flex items-center space-x-2">
-              <span className={costColor}>{biSystemFilter === "All" ? `${percentUsed.toFixed(0)}% of budget` : 'Direct Cost'}</span>
-              {biSystemFilter === "All" && trends && (
-                <span className={`flex items-center text-[10px] font-bold ${parseFloat(trends.momChange) > 0 ? 'text-red-500' : 'text-green-500'}`}>
-                  {parseFloat(trends.momChange) > 0 ? <TrendingUp className="h-2 w-2 mr-0.5"/> : <TrendingDown className="h-2 w-2 mr-0.5"/>}
-                  {Math.abs(trends.momChange)}%
-                </span>
-              )}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <MetricCard 
+              icon={<Coins className="h-5 w-5" />} 
+              title={biSystemFilter === "All" && biUnitFilter === "All" ? "Total Burn" : "Filtered Burn"} 
+              value={`ZAR ${monthlyCost.toFixed(2)}`} 
+              subtitle={
+                <div className="flex items-center space-x-2">
+                  <span className={costColor}>{biSystemFilter === "All" ? `${percentUsed.toFixed(0)}% of budget` : 'Direct Cost'}</span>
+                  {biSystemFilter === "All" && trends && (
+                    <span className={`flex items-center text-[10px] font-bold ${parseFloat(trends.momChange) > 0 ? 'text-red-500' : 'text-green-500'}`}>
+                      {parseFloat(trends.momChange) > 0 ? <TrendingUp className="h-2 w-2 mr-0.5"/> : <TrendingDown className="h-2 w-2 mr-0.5"/>}
+                      {Math.abs(trends.momChange)}%
+                    </span>
+                  )}
+                </div>
+              } 
+            />
+
+            <InteractiveMetricCard 
+              icon={<DollarSign className="h-5 w-5 text-emerald-500" />} 
+              title="CAPEX Deflected" 
+              value={`ZAR ${(opexSaved / 1000).toFixed(1)}k`} 
+              subtitle={<span className="text-emerald-600 font-bold text-[10px]">{deflectedRequests.length} redundant requests blocked</span>} 
+              filterKey="deflected"
+            />
+
+            <div 
+              onClick={onNavigateToRecommendations}
+              className="cursor-pointer hover:scale-[1.01] hover:shadow-sm transition-all duration-200 h-full"
+            >
+              <MetricCard 
+                icon={<Lightbulb className="h-5 w-5 text-amber-500" />} 
+                title="OPEX Reclaim Target" 
+                value={`ZAR ${(potentialOpexReclaim / 1000).toFixed(1)}k`} 
+                subtitle={<span className="text-amber-600 font-bold text-[10px] flex items-center">Click to view {recommendations.length} optimizations <ChevronRight className="h-3 w-3 ml-0.5"/></span>} 
+              />
             </div>
-          } 
-        />
 
-        <InteractiveMetricCard 
-          icon={<DollarSign className="h-5 w-5 text-emerald-500" />} 
-          title="CAPEX Deflected" 
-          value={`ZAR ${(opexSaved / 1000).toFixed(1)}k`} 
-          subtitle={<span className="text-emerald-600 font-bold text-[10px]">{deflectedRequests.length} redundant requests blocked</span>} 
-          filterKey="deflected"
-        />
-
-        <div 
-          onClick={onNavigateToRecommendations}
-          className="cursor-pointer hover:scale-[1.01] hover:shadow-sm transition-all duration-200 h-full"
-        >
-          <MetricCard 
-            icon={<Lightbulb className="h-5 w-5 text-amber-500" />} 
-            title="OPEX Reclaim Target" 
-            value={`ZAR ${(potentialOpexReclaim / 1000).toFixed(1)}k`} 
-            subtitle={<span className="text-amber-600 font-bold text-[10px] flex items-center">Click to view {recommendations.length} optimizations <ChevronRight className="h-3 w-3 ml-0.5"/></span>} 
-          />
+            <MetricCard 
+              icon={<ShieldCheck className="h-5 w-5 text-blue-500" />} 
+              title="MFMA Compliance" 
+              value="100%" 
+              subtitle={<span className="text-blue-600 font-bold text-[10px]">All active IT spend architecturally vetted</span>} 
+            />
+          </div>
         </div>
-
-        <MetricCard 
-          icon={<ShieldCheck className="h-5 w-5 text-blue-500" />} 
-          title="MFMA Compliance" 
-          value="100%" 
-          subtitle={<span className="text-blue-600 font-bold text-[10px]">All active IT spend architecturally vetted</span>} 
-        />
-      </div>
+      )}
 
       {/* 2. PORTFOLIO & OPERATIONAL METRICS */}
-      <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4 mt-8 border-t border-gray-200 pt-6">Portfolio Operations</h3>
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-        <InteractiveMetricCard 
-          icon={<Server className="h-5 w-5" />} 
-          title="IT Portfolio" 
-          value={biSystemFilter === "All" ? systems.length.toString() : "1"} 
-          subtitle={
-            biSystemFilter === "All"
-              ? <div className="flex gap-2 text-[10px] font-bold mt-1.5 bg-gray-100 p-1 rounded w-fit">
-                  <span className="text-green-600">INT: {internalCount}</span>|
-                  <span className="text-blue-600">EXT: {externalCount}</span>|
-                  <span className="text-purple-600">HYB: {hybridCount}</span>
-                </div>
-              : "Isolated View"
-          } 
-          filterKey="portfolio"
-        />
-        
-        <InteractiveMetricCard 
-          icon={<CreditCard className="h-5 w-5" />} 
-          title="Active Licenses" 
-          value={subscriptions.length.toString()} 
-          subtitle={biSystemFilter === "All" ? "Provisioned enterprise seats" : `Seats for ${biSystemFilter}`} 
-          filterKey="subscriptions"
-        />
+      {visibleWidgets?.includes('portfolio') && (
+        <div className="animate-in fade-in duration-300">
+          <h3 className="text-xs font-black text-gray-400 uppercase tracking-widest mb-4 mt-8 border-t border-gray-200 pt-6">Portfolio Operations</h3>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+            <InteractiveMetricCard 
+              icon={<Server className="h-5 w-5" />} 
+              title="IT Portfolio" 
+              value={biSystemFilter === "All" ? systems.length.toString() : "1"} 
+              subtitle={
+                biSystemFilter === "All"
+                  ? <div className="flex gap-2 text-[10px] font-bold mt-1.5 bg-gray-100 p-1 rounded w-fit">
+                      <span className="text-green-600">INT: {internalCount}</span>|
+                      <span className="text-blue-600">EXT: {externalCount}</span>|
+                      <span className="text-purple-600">HYB: {hybridCount}</span>
+                    </div>
+                  : "Isolated View"
+              } 
+              filterKey="portfolio"
+            />
+            
+            <InteractiveMetricCard 
+              icon={<CreditCard className="h-5 w-5" />} 
+              title="Active Licenses" 
+              value={subscriptions.length.toString()} 
+              subtitle={biSystemFilter === "All" ? "Provisioned enterprise seats" : `Seats for ${biSystemFilter}`} 
+              filterKey="subscriptions"
+            />
 
-        <Card className="p-5 bg-white border border-gray-200 shadow-sm flex flex-col justify-center">
-          <div className="flex items-center justify-between mb-2">
-            <div className="flex items-center">
-              <div className="bg-gray-100 p-2 rounded-lg mr-3">
-                <ArrowLeftRight className="h-5 w-5 text-gray-600" />
+            <Card className="p-5 bg-white border border-gray-200 shadow-sm flex flex-col justify-center">
+              <div className="flex items-center justify-between mb-2">
+                <div className="flex items-center">
+                  <div className="bg-gray-100 p-2 rounded-lg mr-3">
+                    <ArrowLeftRight className="h-5 w-5 text-gray-600" />
+                  </div>
+                  <h3 className="text-sm font-bold text-gray-900">EA Vetting Pipeline</h3>
+                </div>
               </div>
-              <h3 className="text-sm font-bold text-gray-900">EA Vetting Pipeline</h3>
-            </div>
+              <div className="flex gap-4 mt-2">
+                 <div 
+                   onClick={() => handleFilterToggle('ea_approved')}
+                   className={`flex-1 rounded-lg p-2 border text-center cursor-pointer transition-all duration-200 ${activeFilter === 'ea_approved' ? 'bg-green-100 border-green-400 ring-2 ring-green-500 scale-105' : 'bg-green-50 border-green-100 hover:bg-green-100'}`}
+                 >
+                   <p className="text-[10px] font-black text-green-700 uppercase tracking-widest mb-0.5">Approved</p>
+                   <p className="text-xl font-black text-green-800">{eaApproved.length}</p>
+                 </div>
+                 <div 
+                   onClick={() => handleFilterToggle('ea_rejected')}
+                   className={`flex-1 rounded-lg p-2 border text-center cursor-pointer transition-all duration-200 ${activeFilter === 'ea_rejected' ? 'bg-red-100 border-red-400 ring-2 ring-red-500 scale-105' : 'bg-red-50 border-red-100 hover:bg-red-100'}`}
+                 >
+                   <p className="text-[10px] font-black text-red-700 uppercase tracking-widest mb-0.5">Vetoed</p>
+                   <p className="text-xl font-black text-red-800">{eaRejected.length}</p>
+                 </div>
+              </div>
+            </Card>
           </div>
-          <div className="flex gap-4 mt-2">
-             <div 
-               onClick={() => handleFilterToggle('ea_approved')}
-               className={`flex-1 rounded-lg p-2 border text-center cursor-pointer transition-all duration-200 ${activeFilter === 'ea_approved' ? 'bg-green-100 border-green-400 ring-2 ring-green-500 scale-105' : 'bg-green-50 border-green-100 hover:bg-green-100'}`}
-             >
-               <p className="text-[10px] font-black text-green-700 uppercase tracking-widest mb-0.5">Approved</p>
-               <p className="text-xl font-black text-green-800">{eaApproved.length}</p>
-             </div>
-             <div 
-               onClick={() => handleFilterToggle('ea_rejected')}
-               className={`flex-1 rounded-lg p-2 border text-center cursor-pointer transition-all duration-200 ${activeFilter === 'ea_rejected' ? 'bg-red-100 border-red-400 ring-2 ring-red-500 scale-105' : 'bg-red-50 border-red-100 hover:bg-red-100'}`}
-             >
-               <p className="text-[10px] font-black text-red-700 uppercase tracking-widest mb-0.5">Vetoed</p>
-               <p className="text-xl font-black text-red-800">{eaRejected.length}</p>
-             </div>
-          </div>
-        </Card>
-      </div>
+        </div>
+      )}
 
       {/* DRILL-DOWN REPORTING TABLE (Renders conditionally if a filter is active) */}
       {activeFilter && (
@@ -339,14 +344,21 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
       )}
       
       {/* 3. ANALYTICS CHARTS */}
-      <div className={`grid grid-cols-1 lg:grid-cols-2 gap-6 items-stretch ${activeFilter ? 'opacity-50 pointer-events-none filter blur-[1px] transition-all' : 'transition-all'}`}>
-        <div className="flex flex-col h-full min-h-[450px] w-full">
-          <WeeklyUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} onSaveReport={onSaveReport} />
+      {(showUsage || showCategory) && (
+        <div className={`grid grid-cols-1 ${chartsGridCols} gap-6 items-stretch ${activeFilter ? 'opacity-50 pointer-events-none filter blur-[1px] transition-all' : 'transition-all'}`}>
+          {showUsage && (
+            <div className="flex flex-col h-full min-h-[450px] w-full animate-in fade-in duration-300">
+              <WeeklyUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} onSaveReport={onSaveReport} />
+            </div>
+          )}
+          {showCategory && (
+            <div className="flex flex-col h-full min-h-[450px] w-full animate-in fade-in duration-300">
+              <CategoryUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} onNavigateToRecommendations={onNavigateToRecommendations} />
+            </div>
+          )}
         </div>
-        <div className="flex flex-col h-full min-h-[450px] w-full">
-          <CategoryUsageChart systemFilter={biSystemFilter} deptFilter={biDeptFilter} onNavigateToRecommendations={onNavigateToRecommendations} />
-        </div>
-      </div>
+      )}
+
     </div>
   );
 };

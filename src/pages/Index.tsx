@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import {
   CreditCard, Lightbulb, Lock, Server, Filter, X,
   Monitor, ShieldAlert, Shield, LogOut, Download, RefreshCw,
-  LayoutDashboard, Users, ShieldCheck, Settings, Menu, Archive, FileText, Fingerprint
+  LayoutDashboard, Users, ShieldCheck, Settings, Menu, Archive, FileText, Fingerprint, SlidersHorizontal
 } from "lucide-react";
 
 // ------------------------------------------------------------------
@@ -47,6 +47,14 @@ const IMU_DEPARTMENTS = [
   "Admin",
   "Customer Service"
 ] as const;
+
+const DASHBOARD_WIDGETS = [
+  { id: 'financial', label: 'Executive Financial Governance', description: 'Budget dials, variance metrics, and high-level spend.' },
+  { id: 'portfolio', label: 'Portfolio Operations', description: 'Active licenses, enterprise catalog count, and EA pipeline.' },
+  { id: 'usage', label: 'Systems Usage Trend', description: '7-day daily active utilization footprint chart.' },
+  { id: 'category', label: 'Category Utilization', description: 'Donut chart of system categories and architectural spread.' },
+  { id: 'recommendations', label: 'AI Optimization Insights', description: 'Cost-saving insights and platform redundancies.' }
+];
 
 // ------------------------------------------------------------------
 // 2. TYPES
@@ -173,6 +181,17 @@ const Index = () => {
   const [isLiveMode, setIsLiveMode] = useState(false);
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isArchiveOpen, setIsArchiveOpen] = useState(false);
+  const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
+
+  // --- Dashboard Customization State ---
+  const [visibleWidgets, setVisibleWidgets] = useState<string[]>(() => {
+    try {
+      const saved = localStorage.getItem('ea_dashboard_widgets');
+      return saved ? JSON.parse(saved) : DASHBOARD_WIDGETS.map(w => w.id);
+    } catch {
+      return DASHBOARD_WIDGETS.map(w => w.id);
+    }
+  });
 
   // --- Data State ---
   const [savedReports, setSavedReports] = useState<SavedReport[]>(() => {
@@ -459,6 +478,14 @@ const Index = () => {
     localStorage.removeItem('ea_saved_reports');
   }, []);
 
+  const toggleWidgetVisibility = (id: string) => {
+    setVisibleWidgets(prev => {
+      const next = prev.includes(id) ? prev.filter(w => w !== id) : [...prev, id];
+      localStorage.setItem('ea_dashboard_widgets', JSON.stringify(next));
+      return next;
+    });
+  };
+
   // ----------------------------------------------------------------
   // 8. EXPORT
   // ----------------------------------------------------------------
@@ -589,6 +616,7 @@ const Index = () => {
             biDeptFilter={biDeptFilter}
             onSaveReport={handleSaveReportToArchive}
             onNavigateToRecommendations={() => setActiveTab('recommendations')}
+            visibleWidgets={visibleWidgets}
           />
         );
 
@@ -740,9 +768,20 @@ const Index = () => {
             </div>
           )}
 
-          <button onClick={() => setIsLiveMode(false)} className="flex items-center px-4 py-2 bg-white/10 text-white rounded-md text-sm font-medium hover:bg-white/20 transition-colors border border-white/20 shadow-sm ml-auto">
-            <X className="h-4 w-4 mr-2" /> Exit
-          </button>
+          <div className="flex items-center ml-auto space-x-3">
+            {['SuperAdmin', 'DepartmentHead', 'EA'].includes(role) && (
+              <Button
+                onClick={() => setIsCustomizeOpen(true)}
+                variant="outline"
+                className="bg-white/10 hover:bg-white/20 text-white border-white/20 font-bold shadow-sm h-9 px-4 transition-colors"
+              >
+                <SlidersHorizontal className="h-4 w-4 mr-2" /> Customize View
+              </Button>
+            )}
+            <button onClick={() => setIsLiveMode(false)} className="flex items-center px-4 py-2 bg-white/10 text-white rounded-md text-sm font-medium hover:bg-white/20 transition-colors border border-white/20 shadow-sm">
+              <X className="h-4 w-4 mr-2" /> Exit
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar p-6">
@@ -752,6 +791,8 @@ const Index = () => {
         </div>
 
         <Footer />
+
+        {/* Live Mode Archive/Customize modals if needed */}
       </div>
     );
   }
@@ -851,8 +892,9 @@ const Index = () => {
           </div>
 
           <div className="flex items-center space-x-3 shrink-0">
-            <div className="flex items-center space-x-2">
-              {activeTab === 'dashboard' && (
+            <div className="flex items-center space-x-2">{
+            
+            activeTab === 'dashboard' && (
                 <Button
                   onClick={() => setIsLiveMode(true)}
                   className="bg-yellow-400 hover:bg-yellow-500 text-blue-900 font-bold shadow-sm h-9 px-4 mr-2"
@@ -860,6 +902,17 @@ const Index = () => {
                   <Monitor className="h-4 w-4 mr-2" /> Live Dashboard
                 </Button>
               )}
+              {activeTab === 'dashboard' && ['SuperAdmin', 'DepartmentHead', 'EA'].includes(role) && (
+                <Button
+                  onClick={() => setIsCustomizeOpen(true)}
+                  variant="outline"
+                  className="bg-white hover:bg-gray-50 text-blue-900 border-gray-200 font-bold shadow-sm h-9 px-4 mr-3"
+                >
+                  <SlidersHorizontal/> 
+                </Button>
+              )}
+
+              
 
               <Button
                 onClick={() => setIsArchiveOpen(true)}
@@ -894,6 +947,48 @@ const Index = () => {
         <Footer />
 
       </main>
+
+      {/* Customize Dashboard Modal */}
+      {isCustomizeOpen && (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex items-center justify-center animate-in fade-in duration-200 p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md flex flex-col overflow-hidden">
+            <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-blue-900">
+              <div className="flex items-center text-white">
+                <SlidersHorizontal className="h-5 w-5 mr-2 text-yellow-400" />
+                <h2 className="text-lg font-bold">Customize Dashboard</h2>
+              </div>
+              <button onClick={() => setIsCustomizeOpen(false)} className="text-blue-200 hover:text-white transition-colors">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 bg-gray-50 flex-1 space-y-3 overflow-y-auto">
+              <p className="text-xs text-gray-500 mb-4 font-medium">Select which modules to display on your dashboard viewport. Changes are saved automatically.</p>
+              
+              {DASHBOARD_WIDGETS.map(widget => (
+                <label key={widget.id} className={`flex items-start p-4 rounded-xl border cursor-pointer transition-all ${visibleWidgets.includes(widget.id) ? 'bg-blue-50 border-blue-300 shadow-sm' : 'bg-white border-gray-200 opacity-70 hover:opacity-100'}`}>
+                  <div className="flex-1">
+                    <p className="text-sm font-bold text-gray-900">{widget.label}</p>
+                    <p className="text-[10px] text-gray-500 mt-1 leading-relaxed">{widget.description}</p>
+                  </div>
+                  <div className="ml-4 flex items-center h-full pt-1">
+                    <input 
+                      type="checkbox" 
+                      className="w-5 h-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                      checked={visibleWidgets.includes(widget.id)}
+                      onChange={() => toggleWidgetVisibility(widget.id)}
+                    />
+                  </div>
+                </label>
+              ))}
+            </div>
+
+            <div className="px-6 py-4 border-t border-gray-200 bg-white flex justify-end">
+              <Button onClick={() => setIsCustomizeOpen(false)} className="bg-blue-900 hover:bg-blue-800 text-white font-bold px-6 shadow-sm">Done</Button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Archive Modal */}
       {isArchiveOpen && (
