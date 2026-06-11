@@ -37,9 +37,19 @@ const initializeSystems = async () => {
         department_id INTEGER
       );
     `);
+
+    await pool.query(`
+    CREATE TABLE IF NOT EXISTS personnel (
+      id SERIAL PRIMARY KEY,
+      email VARCHAR(255) UNIQUE NOT NULL,
+      department_id INTEGER REFERENCES departments(id) ON DELETE SET NULL,
+      onboarding_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
     
     await pool.query(`CREATE TABLE IF NOT EXISTS settings (id SERIAL PRIMARY KEY, monthly_budget DECIMAL DEFAULT 150000.00)`);
     await pool.query(`CREATE TABLE IF NOT EXISTS data_connectors (id SERIAL PRIMARY KEY)`);
+    await pool.query(`ALTER TABLE personnel ADD COLUMN IF NOT EXISTS onboarding_date TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
 
     // 2. Systems Catalog (Updated for CRM & EA Needs)
     await pool.query(`
@@ -879,6 +889,7 @@ app.get('/api/requests', authenticateToken, async (req, res) => {
         lr.aligned_domains,
         lr.crm_status,
         lr.crm_deflection_score,
+        lr.alignment_score,
         lr.ea_status,
         TO_CHAR(lr.request_date, 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at
       FROM license_requests lr

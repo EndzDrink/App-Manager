@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   ShieldCheck, 
   FileSearch, 
@@ -21,7 +21,10 @@ import {
   Lock,
   GitPullRequest,
   Copy,
-  FileCheck
+  FileCheck,
+  RefreshCw,
+  Clock,
+  User
 } from 'lucide-react';
 import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -35,11 +38,20 @@ interface AuditTabProps {
   systems: any[]; 
 }
 
+interface AuditLog {
+  id: number;
+  action: string;
+  timestamp: string;
+  operator: string;
+}
+
 type ResolutionStep = 'select' | 'notifying' | 'notify-success' | 'consolidate-config' | 'consolidating' | 'consolidate-success';
-type ExecutiveView = 'operations' | 'ag-matrix';
+type ExecutiveView = 'operations' | 'ag-matrix' | 'compliance-ledger';
 
 export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onDepartmentClick, systems }) => {
   const [executiveView, setExecutiveView] = useState<ExecutiveView>('operations');
+  
+  // TENDER GATEKEEPER STATES
   const [specText, setSpecText] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [scanResult, setScanResult] = useState<null | 'clean' | 'flagged'>(null);
@@ -54,54 +66,76 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
   const [ticketId, setTicketId] = useState<string>('');
   const [activeResolutions, setActiveResolutions] = useState<Record<string, string>>({});
 
-  // TENDER GATEKEEPER SECURITY STATES
   const [clearanceToken, setClearanceToken] = useState<string>('');
   const [isCopied, setIsCopied] = useState(false);
 
-  // AG COMPLIANCE MATRIX STATES (Now Mutable for active remediation)
+  // COMPLIANCE LEDGER STATES
+  const [logs, setLogs] = useState<AuditLog[]>([]);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+
+  // AG COMPLIANCE MATRIX STATES 
   const [isHandingOver, setIsHandingOver] = useState(false);
   const [alignmentData, setAlignmentData] = useState([
     { 
-      id: "PRJ-2026-782", 
-      name: "e-Sign Expansion (DocuSign)", 
-      ea_strategy: "Paperless Municipality", 
-      status: "Orphan", 
-      payer: "UNASSIGNED", 
-      risk: "Critical",
-      next_step: "DD of Finance must assign an Operational Budget Code to transition from EA Pilot budget to Sustenance budget.",
-      owner: "Finance / IMU"
+      id: "PRJ-2026-782", name: "e-Sign Expansion (DocuSign)", ea_strategy: "Paperless Municipality", 
+      status: "Orphan", payer: "UNASSIGNED", risk: "Critical",
+      next_step: "DD of Finance must assign an Operational Budget Code to transition from EA Pilot budget to Sustenance budget.", owner: "Finance / IMU"
     },
     { 
-      id: "PRJ-2026-112", 
-      name: "SAP S/4HANA Migration", 
-      ea_strategy: "Financial Integrity", 
-      status: "Aligned", 
-      payer: "Finance Dept", 
-      risk: "Low",
-      next_step: "Regular quarterly license true-up required in July 2026.",
-      owner: "Finance Unit"
+      id: "PRJ-2026-112", name: "SAP S/4HANA Migration", ea_strategy: "Financial Integrity", 
+      status: "Aligned", payer: "Finance Dept", risk: "Low",
+      next_step: "Regular quarterly license true-up required in July 2026.", owner: "Finance Unit"
     },
     { 
-      id: "PRJ-2026-809", 
-      name: "ESRI ArcGIS Servers", 
-      ea_strategy: "Smart City Infrastructure", 
-      status: "Aligned", 
-      payer: "IMU - GIS Unit", 
-      risk: "Low",
-      next_step: "Verify server redundancy for the new precinct development plan.",
-      owner: "IMU - GIS"
+      id: "PRJ-2026-809", name: "ESRI ArcGIS Servers", ea_strategy: "Smart City Infrastructure", 
+      status: "Aligned", payer: "IMU - GIS Unit", risk: "Low",
+      next_step: "Verify server redundancy for the new precinct development plan.", owner: "IMU - GIS"
     },
     { 
-      id: "PRJ-2026-445", 
-      name: "Slack Enterprise", 
-      ea_strategy: "Missing Architecture Doc", 
-      status: "Orphan", 
-      payer: "UNASSIGNED", 
-      risk: "High",
-      next_step: "EA Team must upload the 2026 Collaboration Blueprint to justify the multi-tenancy cost center.",
-      owner: "EA Unit"
+      id: "PRJ-2026-445", name: "Slack Enterprise", ea_strategy: "Missing Architecture Doc", 
+      status: "Orphan", payer: "UNASSIGNED", risk: "High",
+      next_step: "EA Team must upload the 2026 Collaboration Blueprint to justify the multi-tenancy cost center.", owner: "EA Unit"
     }
   ]);
+
+  // --- LEDGER FETCH LOGIC ---
+  const fetchLogs = async () => {
+    setIsLoadingLogs(true);
+    try {
+      const token = localStorage.getItem('appManagerToken');
+      const res = await fetch(`${API_URL}/api/audit/logs`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setLogs(data);
+      }
+    } catch (err) {
+      console.error("Failed to fetch audit logs:", err);
+    } finally {
+      setIsLoadingLogs(false);
+    }
+  };
+
+  useEffect(() => {
+    if (executiveView === 'compliance-ledger' && logs.length === 0) {
+      fetchLogs();
+    }
+  }, [executiveView]);
+
+  const getLogStyling = (rawAction: string | null) => {
+    const action = rawAction || ''; 
+    if (action.includes('FISCAL FREEZE') || action.includes('ESCALATION') || action.includes('REVOKED')) {
+      return { icon: <AlertTriangle className="h-4 w-4 text-red-500" />, bgColor: 'bg-red-50', borderColor: 'border-red-100' };
+    }
+    if (action.includes('RECONCILIATION')) {
+      return { icon: <RefreshCw className="h-4 w-4 text-orange-500" />, bgColor: 'bg-orange-50', borderColor: 'border-orange-100' };
+    }
+    if (action.includes('GOVERNANCE') || action.includes('PROCUREMENT') || action.includes('MAPPED')) {
+      return { icon: <ShieldCheck className="h-4 w-4 text-blue-500" />, bgColor: 'bg-blue-50', borderColor: 'border-blue-100' };
+    }
+    return { icon: <Activity className="h-4 w-4 text-gray-500" />, bgColor: 'bg-gray-50', borderColor: 'border-gray-100' };
+  };
 
   // --- TENDER GATEKEEPER LOGIC ---
   const handleRunScan = () => {
@@ -144,17 +178,13 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
         setScanResult('flagged');
       } else {
         setScanResult('clean');
-        // Generate a cryptographically styled secure token for SCM
         setClearanceToken(`EA-AUTH-${Math.random().toString(36).substr(2, 9).toUpperCase()}`);
       }
     }, 2000);
   };
 
   const clearScan = () => { 
-    setSpecText(''); 
-    setScanResult(null); 
-    setClearanceToken('');
-    setIsCopied(false);
+    setSpecText(''); setScanResult(null); setClearanceToken(''); setIsCopied(false);
   };
 
   const copyClearanceToken = () => {
@@ -167,24 +197,15 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
   const handleInitiateHandover = async () => {
     if (!selectedAlignment) return;
     setIsHandingOver(true);
-
-    // Simulate API call to update the project ownership and alert the DD
     setTimeout(() => {
       setAlignmentData(prev => prev.map(item => {
         if (item.id === selectedAlignment.id) {
-          return {
-            ...item,
-            status: "Remediation Active",
-            payer: item.owner, // Shift ownership to the correct DD
-            risk: "Medium", // Downgrade risk since it's actively managed now
-            next_step: "Pending formal DD sign-off in the Identity Matrix to finalize budget transfer."
-          };
+          return { ...item, status: "Remediation Active", payer: item.owner, risk: "Medium", next_step: "Pending formal DD sign-off in the Identity Matrix to finalize budget transfer." };
         }
         return item;
       }));
-      
       setIsHandingOver(false);
-      setSelectedAlignment(null); // Close modal
+      setSelectedAlignment(null);
     }, 1500);
   };
 
@@ -199,10 +220,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
   const closeResolutionModal = () => {
     if (resolutionStep === 'notify-success' || resolutionStep === 'consolidate-success') {
       if (selectedDuplicate) {
-        setActiveResolutions(prev => ({
-          ...prev,
-          [selectedDuplicate.category]: ticketId
-        }));
+        setActiveResolutions(prev => ({ ...prev, [selectedDuplicate.category]: ticketId }));
       }
     }
     setSelectedDuplicate(null);
@@ -218,25 +236,12 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
     try {
       await fetch(`${API_URL}/api/pmo/escalate`, {
         method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}` 
-        },
-        body: JSON.stringify({ 
-          project_id: generatedTicket, 
-          reason: `EA Consolidation Required for Category: ${selectedDuplicate?.category}. Overlapping systems: ${systemsInvolved}` 
-        })
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ project_id: generatedTicket, reason: `EA Consolidation Required for Category: ${selectedDuplicate?.category}. Overlapping systems: ${systemsInvolved}` })
       });
-
-      setTimeout(() => {
-        setTicketId(generatedTicket);
-        setResolutionStep('notify-success');
-      }, 800);
+      setTimeout(() => { setTicketId(generatedTicket); setResolutionStep('notify-success'); }, 800);
     } catch (err) {
-      setTimeout(() => {
-        setTicketId(generatedTicket);
-        setResolutionStep('notify-success');
-      }, 800);
+      setTimeout(() => { setTicketId(generatedTicket); setResolutionStep('notify-success'); }, 800);
     }
   };
 
@@ -261,23 +266,30 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
           <p className="text-xs text-gray-500 mt-1 font-medium">Eliminating silos between EA Strategy, PMO Projects, and Departmental DDs</p>
         </div>
         
-        <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200 shadow-inner">
+        <div className="flex bg-gray-100 p-1 rounded-lg border border-gray-200 shadow-inner overflow-x-auto custom-scrollbar">
           <button 
             onClick={() => setExecutiveView('operations')}
-            className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${executiveView === 'operations' ? 'bg-white text-blue-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-blue-800'}`}
+            className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${executiveView === 'operations' ? 'bg-white text-blue-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-blue-800'}`}
           >
             <Activity className="h-3.5 w-3.5 inline mr-1.5" /> Operational Audit
           </button>
           <button 
             onClick={() => setExecutiveView('ag-matrix')}
-            className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${executiveView === 'ag-matrix' ? 'bg-white text-blue-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-blue-800'}`}
+            className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${executiveView === 'ag-matrix' ? 'bg-white text-blue-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-blue-800'}`}
           >
             <GitPullRequest className="h-3.5 w-3.5 inline mr-1.5" /> AG Compliance Matrix
+          </button>
+          <button 
+            onClick={() => setExecutiveView('compliance-ledger')}
+            className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all whitespace-nowrap ${executiveView === 'compliance-ledger' ? 'bg-white text-blue-900 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-blue-800'}`}
+          >
+            <FileText className="h-3.5 w-3.5 inline mr-1.5" /> Compliance Ledger
           </button>
         </div>
       </div>
 
-      {executiveView === 'operations' ? (
+      {/* VIEW RENDERER */}
+      {executiveView === 'operations' && (
         <div className="flex-1 flex flex-col min-h-0 space-y-6">
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 shrink-0">
             {[
@@ -378,7 +390,6 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
                       >
                         {isCopied ? <><FileCheck className="h-4 w-4 mr-2" /> Copied to Clipboard</> : <><Copy className="h-4 w-4 mr-2" /> Export EA Clearance</>}
                       </Button>
-                      <p className="text-[9px] text-gray-400 mt-2">Required attachment for SCM procurement</p>
                     </div>
                   )}
                 </div>
@@ -453,8 +464,10 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
             </Card>
           </div>
         </div>
-      ) : (
-        /* 2. ACTIONABLE AG COMPLIANCE MATRIX */
+      )}
+
+      {/* VIEW RENDERER 2: AG COMPLIANCE */}
+      {executiveView === 'ag-matrix' && (
         <div className="flex-1 animate-in slide-in-from-bottom-4 duration-500 min-h-0 flex flex-col">
           <Card className="border-blue-200 shadow-sm rounded-xl bg-white overflow-hidden flex flex-col h-full">
             <div className="bg-blue-900 px-6 py-4 flex justify-between items-center text-white shrink-0">
@@ -529,7 +542,78 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
         </div>
       )}
 
-      {/* 3. STRATEGIC ACTION SIDE PANEL */}
+      {/* VIEW RENDERER 3: NEW COMPLIANCE LEDGER TIMELINE */}
+      {executiveView === 'compliance-ledger' && (
+        <div className="flex-1 animate-in slide-in-from-bottom-4 duration-500 min-h-0 flex flex-col">
+          <Card className="border border-gray-200 shadow-sm rounded-xl overflow-hidden bg-white flex flex-col h-full">
+            <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-between items-center shrink-0">
+              <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wider flex items-center">
+                <FileText className="h-4 w-4 mr-2 text-gray-500" />
+                System Event Timeline
+              </h3>
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-bold text-blue-800 bg-blue-100 px-2 py-1 rounded border border-blue-200">MFMA SECURE LEDGER</span>
+                <Button 
+                  onClick={fetchLogs} 
+                  disabled={isLoadingLogs}
+                  size="sm"
+                  variant="outline" 
+                  className="bg-white h-7 text-xs font-bold"
+                >
+                  <RefreshCw className={`h-3 w-3 mr-1.5 ${isLoadingLogs ? 'animate-spin text-blue-500' : ''}`} />
+                  Sync
+                </Button>
+              </div>
+            </div>
+
+            <div className="p-0 overflow-auto flex-1 custom-scrollbar">
+              {logs.length === 0 ? (
+                <div className="py-16 text-center text-gray-400 flex flex-col items-center">
+                  <ShieldCheck className="h-10 w-10 mb-3 opacity-20" />
+                  <p className="text-sm font-bold text-gray-500">No governance actions logged yet.</p>
+                  {isLoadingLogs && <p className="text-[10px] mt-2">Connecting to database...</p>}
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-50">
+                  {logs.map((log) => {
+                    const style = getLogStyling(log.action);
+                    return (
+                      <div key={log.id} className={`p-4 hover:bg-gray-50/50 transition-colors flex gap-4 ${style.bgColor}`}>
+                        
+                        <div className={`mt-1 h-8 w-8 rounded-full border flex items-center justify-center shrink-0 bg-white shadow-sm ${style.borderColor}`}>
+                          {style.icon}
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-gray-900 leading-relaxed mb-2">
+                          {log.action || 'System action logged without description.'}
+                        </p>
+                          
+                          <div className="flex items-center gap-4 text-[10px] font-bold uppercase tracking-wider text-gray-500">
+                            <span className="flex items-center">
+                              <Clock className="h-3 w-3 mr-1 opacity-70" />
+                              {log.timestamp}
+                            </span>
+                            <span className="flex items-center text-blue-700 bg-blue-100/50 px-2 py-0.5 rounded">
+                              <User className="h-3 w-3 mr-1 opacity-70" />
+                              {log.operator}
+                            </span>
+                            <span className="text-gray-400 font-mono">
+                              ID: {log.id.toString().padStart(6, '0')}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* STRATEGIC ACTION SIDE PANEL (For AG Matrix) */}
       {selectedAlignment && (
         <div className="fixed inset-0 bg-blue-900/40 backdrop-blur-sm z-[110] flex items-center justify-end animate-in fade-in">
           <div className="bg-white h-screen w-full max-w-md shadow-2xl animate-in slide-in-from-right duration-300 flex flex-col">
@@ -607,7 +691,7 @@ export const AuditTab: React.FC<AuditTabProps> = ({ duplications, deptSpend, onD
         </div>
       )}
 
-      {/* 4. OPERATIONAL RESOLUTION MODAL */}
+      {/* OPERATIONAL RESOLUTION MODAL (For Duplications) */}
       {selectedDuplicate && (
         <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4 animate-in fade-in">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
