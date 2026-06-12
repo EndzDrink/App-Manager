@@ -495,27 +495,18 @@ app.post('/api/connectors', authenticateToken, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// --- ACTIVE PING / MANUAL SYNC ROUTE ---
 app.post('/api/connectors/:id/sync', authenticateToken, async (req, res, next) => {
   const { id } = req.params;
   const operatorId = req.user.id || null;
 
   try {
-    // 1. Verify the connector exists
     const connRes = await pool.query('SELECT * FROM data_connectors WHERE id = $1', [id]);
     if (connRes.rowCount === 0) return res.status(404).json({ error: "Data interface not found." });
     
     const connector = connRes.rows[0];
 
-    // 2. Update the last_sync timestamp to CURRENT_TIMESTAMP and ensure status is active
-    await pool.query(
-      `UPDATE data_connectors 
-       SET last_sync = CURRENT_TIMESTAMP, status = 'active' 
-       WHERE id = $1`, 
-      [id]
-    );
+    await pool.query(`UPDATE data_connectors SET last_sync = CURRENT_TIMESTAMP, status = 'active' WHERE id = $1`, [id]);
 
-    // 3. Log the manual sync to the Compliance Ledger for the Auditor-General
     await pool.query(
       `INSERT INTO usage_logs (user_id, action, duration_minutes) VALUES ($1, $2, 0)`,
       [operatorId, `INTEGRATION: Manual sync execution triggered for interface: ${connector.provider_name}.`]
@@ -525,6 +516,29 @@ app.post('/api/connectors/:id/sync', authenticateToken, async (req, res, next) =
   } catch (err) { 
     next(err); 
   }
+});
+
+// --- NEW IN-APP NOTIFICATION ROUTES ---
+app.get('/api/notifications', authenticateToken, async (req, res, next) => {
+  const { role, deptId, id } = req.user;
+  try {
+    // Fetch notifications aimed at the exact user, their department, or their global role (e.g. all 'EA' users)
+    const result = await pool.query(
+      `SELECT * FROM notifications 
+       WHERE is_read = FALSE 
+       AND (target_role = $1 OR target_dept_id = $2 OR target_user_id = $3)
+       ORDER BY created_at DESC`,
+      [role, deptId, id]
+    );
+    res.json(result.rows);
+  } catch (err) { next(err); }
+});
+
+app.put('/api/notifications/:id/read', authenticateToken, async (req, res, next) => {
+  try {
+    await pool.query('UPDATE notifications SET is_read = TRUE WHERE id = $1', [req.params.id]);
+    res.json({ success: true });
+  } catch (err) { next(err); }
 });
 
 // --- 10. EA GOVERNANCE, PMO & CRM PIPELINES ---
@@ -550,6 +564,14 @@ app.post('/api/requests', authenticateToken, async (req, res, next) => {
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, CURRENT_TIMESTAMP) RETURNING id`,
       [userId, system_id, 'Pending', 'pending', 'pending', category || 'Uncategorized', JSON.stringify(required_capabilities || []), estimated_users || 1, estimated_cost_annual || 0.00, justification || '', exception_justification || '', JSON.stringify(aligned_domains || [])]
     );
+
+    // TRIGGER AUTOMATED NOTIFICATION
+    await pool.query(
+      `INSERT INTO notifications (target_role, title, message, alert_type) 
+       VALUES ($1, $2, $3, $4)`,
+      ['EA', 'New Architecture Request', `A new license request (REQ-${result.rows[0].id}) has entered the pipeline and requires vetting.`, 'info']
+    );
+
     res.json({ success: true, message: "Request queued for CRM vetting.", id: `REQ-${result.rows[0].id}` });
   } catch (err) { next(err); }
 });

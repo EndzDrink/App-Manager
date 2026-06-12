@@ -22,7 +22,7 @@ import { Button } from "@/components/ui/button";
 import {
   CreditCard, Lightbulb, Lock, Server, Filter, X,
   Monitor, ShieldAlert, Shield, LogOut, Download, RefreshCw,
-  LayoutDashboard, Users, ShieldCheck, Settings, Menu, Archive, FileText, Fingerprint, SlidersHorizontal
+  LayoutDashboard, Users, ShieldCheck, Settings, Menu, Archive, FileText, Fingerprint, SlidersHorizontal, Bell, CheckCircle2
 } from "lucide-react";
 
 // ------------------------------------------------------------------
@@ -166,7 +166,98 @@ const USER_ROLES: AppRole[] = ['SuperAdmin', 'EA', 'DepartmentHead'];
 const EA_STRATEGY_ROLES: AppRole[] = ['SuperAdmin', 'EA'];
 
 // ------------------------------------------------------------------
-// 5. COMPONENT
+// 5. NOTIFICATION COMPONENT
+// ------------------------------------------------------------------
+const NotificationBell = () => {
+  const [alerts, setAlerts] = useState<any[]>([]);
+  const [isOpen, setIsOpen] = useState(false);
+
+  const fetchAlerts = useCallback(async () => {
+    const token = localStorage.getItem('appManagerToken');
+    if (!token) return;
+    try {
+      const res = await fetch(`${API_URL}/api/notifications`, { 
+        headers: { 'Authorization': `Bearer ${token}` } 
+      });
+      if (res.ok) setAlerts(await res.json());
+    } catch (err) {
+      console.error("Failed to fetch notifications");
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchAlerts();
+    const interval = setInterval(fetchAlerts, 60000); // Poll every 60s
+    return () => clearInterval(interval);
+  }, [fetchAlerts]);
+
+  const markAsRead = async (id: number) => {
+    try {
+      const token = localStorage.getItem('appManagerToken');
+      await fetch(`${API_URL}/api/notifications/${id}/read`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      setAlerts(alerts.filter(a => a.id !== id));
+    } catch (err) {
+      console.error("Failed to mark as read");
+    }
+  };
+
+  return (
+    <div className="relative mr-2">
+      <Button 
+        onClick={() => setIsOpen(!isOpen)} 
+        variant="ghost" 
+        size="icon" 
+        className="text-blue-100 hover:bg-blue-800 hover:text-white rounded-full h-9 w-9 relative transition-colors"
+      >
+        <Bell className="h-4 w-4" />
+        {alerts.length > 0 && (
+          <span className="absolute top-1 right-1 bg-red-500 text-white text-[9px] font-bold h-3.5 w-3.5 rounded-full flex items-center justify-center border border-blue-900">
+            {alerts.length}
+          </span>
+        )}
+      </Button>
+
+      {isOpen && (
+        <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl border border-gray-200 z-[100] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+          <div className="p-3 bg-blue-900 text-white border-b border-blue-800 flex justify-between items-center">
+            <h3 className="font-bold text-sm tracking-wide">Action Items</h3>
+            {alerts.length > 0 && (
+              <span className="text-[10px] bg-blue-800 px-2 py-0.5 rounded-full font-bold">{alerts.length} New</span>
+            )}
+          </div>
+          <div className="max-h-72 overflow-y-auto custom-scrollbar">
+            {alerts.length === 0 ? (
+              <div className="p-6 flex flex-col items-center justify-center text-gray-400">
+                <CheckCircle2 className="h-8 w-8 mb-2 opacity-20" />
+                <p className="text-xs font-bold">You are all caught up!</p>
+              </div>
+            ) : (
+              alerts.map(alert => (
+                <div 
+                  key={alert.id} 
+                  className="p-4 border-b border-gray-100 hover:bg-blue-50/50 flex justify-between items-start cursor-pointer transition-colors group" 
+                  onClick={() => markAsRead(alert.id)}
+                >
+                  <div className="flex-1 pr-4">
+                    <p className="text-sm font-bold text-gray-900 group-hover:text-blue-700 transition-colors">{alert.title}</p>
+                    <p className="text-xs text-gray-500 mt-1 leading-relaxed">{alert.message}</p>
+                  </div>
+                  <div className="w-2 h-2 rounded-full bg-blue-500 mt-1.5 shrink-0 shadow-sm" />
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ------------------------------------------------------------------
+// 6. MAIN COMPONENT
 // ------------------------------------------------------------------
 const Index = () => {
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('appManagerToken'));
@@ -224,7 +315,7 @@ const Index = () => {
   const [biDeptFilter, setBiDeptFilter] = useState<string>("All");
 
   // ----------------------------------------------------------------
-  // 6. MEMOIZED DERIVATIONS
+  // 7. MEMOIZED DERIVATIONS
   // ----------------------------------------------------------------
   const visibleNavItems = useMemo(() => NAV_ITEMS.filter(item => item.roles.includes(role)), [role]);
 
@@ -308,7 +399,7 @@ const Index = () => {
   }, [percentUsed]);
 
   // ----------------------------------------------------------------
-  // 7. HANDLERS
+  // 8. HANDLERS
   // ----------------------------------------------------------------
   const handleLogout = useCallback(() => {
     localStorage.removeItem('appManagerToken');
@@ -487,7 +578,7 @@ const Index = () => {
   };
 
   // ----------------------------------------------------------------
-  // 8. EXPORT
+  // 9. EXPORT
   // ----------------------------------------------------------------
   const handleExportData = useCallback(() => {
     const dateStamp = new Date().toISOString().split('T')[0];
@@ -532,7 +623,7 @@ const Index = () => {
   }, [activeTab, systems, filteredSubscriptions, handleSaveReportToArchive]);
 
   // ----------------------------------------------------------------
-  // 9. FILTER EVENT HANDLERS
+  // 10. FILTER EVENT HANDLERS
   // ----------------------------------------------------------------
   const handleSystemChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
@@ -571,7 +662,7 @@ const Index = () => {
   }, [biUnitFilter, biSystemFilter, users]);
 
   // ----------------------------------------------------------------
-  // 10. EFFECTS
+  // 11. EFFECTS
   // ----------------------------------------------------------------
   useEffect(() => {
     if (token) refreshAllData();
@@ -585,7 +676,7 @@ const Index = () => {
   }, [activeTab, visibleNavItems]);
 
   // ----------------------------------------------------------------
-  // 11. RENDER HELPERS
+  // 12. RENDER HELPERS
   // ----------------------------------------------------------------
   if (!token) return <Login onLoginSuccess={handleLoginSuccess} />;
 
@@ -746,7 +837,7 @@ const Index = () => {
   );
 
   // ----------------------------------------------------------------
-  // 12. LIVE MODE
+  // 13. LIVE MODE
   // ----------------------------------------------------------------
   if (isLiveMode) {
     return (
@@ -791,14 +882,12 @@ const Index = () => {
         </div>
 
         <Footer />
-
-        {/* Live Mode Archive/Customize modals if needed */}
       </div>
     );
   }
 
   // ----------------------------------------------------------------
-  // 13. MAIN LAYOUT
+  // 14. MAIN LAYOUT
   // ----------------------------------------------------------------
   return (
     <div className="flex h-screen overflow-hidden relative bg-gray-50">
@@ -892,9 +981,11 @@ const Index = () => {
           </div>
 
           <div className="flex items-center space-x-3 shrink-0">
-            <div className="flex items-center space-x-2">{
-            
-            activeTab === 'dashboard' && (
+            <div className="flex items-center space-x-2">
+              
+              <NotificationBell />
+
+              {activeTab === 'dashboard' && (
                 <Button
                   onClick={() => setIsLiveMode(true)}
                   className="bg-yellow-400 hover:bg-yellow-500 text-blue-900 font-bold shadow-sm h-9 px-4 mr-2"
@@ -908,11 +999,9 @@ const Index = () => {
                   variant="outline"
                   className="bg-white hover:bg-gray-50 text-blue-900 border-gray-200 font-bold shadow-sm h-9 px-4 mr-3"
                 >
-                  <SlidersHorizontal/> 
+                  <SlidersHorizontal className="h-4 w-4" /> 
                 </Button>
               )}
-
-              
 
               <Button
                 onClick={() => setIsArchiveOpen(true)}

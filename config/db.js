@@ -146,6 +146,21 @@ export const initializeSystems = async () => {
     `);
     await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
 
+    // --- NEW: IN-APP NOTIFICATIONS TABLE ---
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS notifications (
+        id SERIAL PRIMARY KEY,
+        target_role VARCHAR(50),
+        target_dept_id INTEGER,
+        target_user_id INTEGER,
+        title VARCHAR(255) NOT NULL,
+        message TEXT NOT NULL,
+        alert_type VARCHAR(50) DEFAULT 'info',
+        is_read BOOLEAN DEFAULT FALSE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+
     const columnsToEnsure = [
       { name: 'provider_name', type: 'VARCHAR(255)' },
       { name: 'api_endpoint', type: 'VARCHAR(255)' },
@@ -162,7 +177,7 @@ export const initializeSystems = async () => {
     await pool.query(`INSERT INTO admin_users (email, password_hash, role) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING`, ['admin@organization.com', hashedPassword, 'SuperAdmin']);
     await pool.query(`INSERT INTO settings (id, monthly_budget) VALUES (1, 150000.00) ON CONFLICT (id) DO NOTHING`);
 
-    console.log("✅ Database Schema Verified & Hardened with SEAM Constraints.");
+    console.log("✅ Database Schema Verified & Hardened with SEAM Constraints (Notifications Active).");
   } catch (err) { 
     console.error("❌ DB Initialization failed:", err.message); 
   }
