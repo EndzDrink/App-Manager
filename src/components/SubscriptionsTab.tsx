@@ -221,8 +221,8 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
       
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-gray-200 mb-6 shrink-0">
         <div>
-          <h2 className="text-xl font-bold text-gray-900 flex items-center tracking-tight">
-            <CreditCard className="h-6 w-6 mr-2 text-blue-600" />
+          <h2 className="text-xl font-black text-blue-900 flex items-center tracking-tight">
+            <CreditCard className="h-6 w-6 mr-2 text-blue-800" />
             Financial License Ledger
           </h2>
           <p className="text-xs text-gray-500 mt-1 font-medium">Manage departmental budgets, active usage, and cross-department license transfers.</p>

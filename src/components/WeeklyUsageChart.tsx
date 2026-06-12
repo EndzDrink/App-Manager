@@ -196,7 +196,7 @@ export const WeeklyUsageChart: React.FC<WeeklyUsageChartProps> = ({ systemFilter
           </button>
           
           <div>
-            <h3 className="text-sm font-bold text-gray-900 tracking-tight">
+            <h3 className="text-sm font-bold font-black text-blue-900 tracking-tight">
               Systems Usage
             </h3>
             <p className="text-xs text-gray-500 mt-0.5">

@@ -3,7 +3,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
   Download, RotateCcw, RefreshCw, Settings, Wallet, Globe, 
-  Plus, Link2, FileSpreadsheet, Database, Users, Server, X, Map, LayoutDashboard, CheckCircle2, AlertCircle
+  Plus, Link2, FileSpreadsheet, Database, Users, Server, X, Map, LayoutDashboard, CheckCircle2, AlertCircle, Settings2
 } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -90,7 +90,7 @@ export const AdminTab: React.FC<AdminTabProps> = ({
       
       <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-2">
         <div>
-          <h1 className="text-2xl font-bold text-blue-900 tracking-tight">Governance & Integrations</h1>
+          <h1 className="text-xl font-black text-blue-900 flex items-center tracking-tight"><Settings className="h-6 w-6 mr-2 text-blue-800" />Governance & Integrations</h1>
           <p className="text-sm text-gray-500 mt-1">Manage data interface pipelines and global system parameters.</p>
         </div>
       </div>

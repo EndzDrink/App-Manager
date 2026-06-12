@@ -144,7 +144,7 @@ export const CategoryUsageChart: React.FC<CategoryUsageChartProps> = ({ systemFi
             {chartType === 'pie' && <PieIcon className="h-4 w-4 group-hover:scale-110 transition-transform" />}
           </button>
           <div>
-            <h3 className="text-sm font-bold text-gray-900 tracking-tight">Category Utilization</h3>
+            <h3 className="text-sm font-bold font-black text-blue-900 tracking-tight">Category Utilization</h3>
             <p className="text-xs text-gray-500 mt-0.5">Audit of active usage vs inactive capacity</p>
           </div>
         </div>

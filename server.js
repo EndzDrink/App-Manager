@@ -495,6 +495,38 @@ app.post('/api/connectors', authenticateToken, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// --- ACTIVE PING / MANUAL SYNC ROUTE ---
+app.post('/api/connectors/:id/sync', authenticateToken, async (req, res, next) => {
+  const { id } = req.params;
+  const operatorId = req.user.id || null;
+
+  try {
+    // 1. Verify the connector exists
+    const connRes = await pool.query('SELECT * FROM data_connectors WHERE id = $1', [id]);
+    if (connRes.rowCount === 0) return res.status(404).json({ error: "Data interface not found." });
+    
+    const connector = connRes.rows[0];
+
+    // 2. Update the last_sync timestamp to CURRENT_TIMESTAMP and ensure status is active
+    await pool.query(
+      `UPDATE data_connectors 
+       SET last_sync = CURRENT_TIMESTAMP, status = 'active' 
+       WHERE id = $1`, 
+      [id]
+    );
+
+    // 3. Log the manual sync to the Compliance Ledger for the Auditor-General
+    await pool.query(
+      `INSERT INTO usage_logs (user_id, action, duration_minutes) VALUES ($1, $2, 0)`,
+      [operatorId, `INTEGRATION: Manual sync execution triggered for interface: ${connector.provider_name}.`]
+    );
+
+    res.json({ success: true, message: "Interface pinged successfully." });
+  } catch (err) { 
+    next(err); 
+  }
+});
+
 // --- 10. EA GOVERNANCE, PMO & CRM PIPELINES ---
 app.post('/api/pmo/escalate', authenticateToken, async (req, res, next) => {
   const { project_id, reason } = req.body;

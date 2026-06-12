@@ -168,8 +168,8 @@ export const EAStrategyTab = () => {
       {/* HEADER SECTION */}
       <div className="flex justify-between items-center mb-6 shrink-0">
         <div>
-          <h2 className="text-xl font-bold text-gray-900 flex items-center tracking-tight">
-            <Fingerprint className="h-6 w-6 mr-2 text-blue-600" />
+          <h2 className="text-xl font-black text-blue-900 flex items-center tracking-tight">
+            <Fingerprint className="h-6 w-6 mr-2 text-blue-800" />
             Enterprise Architecture Strategy
           </h2>
           <p className="text-xs text-gray-500 mt-1 font-medium">Govern IT investments through strict architectural domain alignment.</p>

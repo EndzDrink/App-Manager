@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { 
-  Lightbulb, CheckCircle2, BotMessageSquare, Activity, BrainCircuit, Search, X, Trash2, ShieldAlert, Loader2 
+  Lightbulb, CheckCircle2, BotMessageSquare, Activity, BrainCircuit, Search, X, Trash2, ShieldAlert, Loader2, LightbulbIcon 
 } from "lucide-react";
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
@@ -68,7 +68,7 @@ export const RecommendationsTab: React.FC<RecommendationsTabProps> = ({ recommen
   return (
     <div className="space-y-8 animate-in fade-in duration-500 max-w-6xl pb-12">
       <div>
-        <h2 className="text-xl font-semibold text-gray-900 tracking-tight">Executive Optimization</h2>
+        <h2 className="text-xl font-black text-blue-900 flex items-center tracking-tight"><LightbulbIcon className="h-6 w-6 mr-2 text-blue-800" />Executive Optimization</h2>
         <p className="text-sm text-gray-500 font-medium mt-1">AI-driven analysis and actionable license reclamation.</p>
       </div>
 
