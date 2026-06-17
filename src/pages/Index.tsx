@@ -168,7 +168,7 @@ const EA_STRATEGY_ROLES: AppRole[] = ['SuperAdmin', 'EA'];
 // ------------------------------------------------------------------
 // 5. NOTIFICATION COMPONENT
 // ------------------------------------------------------------------
-const NotificationBell = () => {
+const NotificationBell = ({ onNavigate }: { onNavigate: (tab: string) => void }) => {
   const [alerts, setAlerts] = useState<any[]>([]);
   const [isOpen, setIsOpen] = useState(false);
 
@@ -187,20 +187,43 @@ const NotificationBell = () => {
 
   useEffect(() => {
     fetchAlerts();
-    const interval = setInterval(fetchAlerts, 60000); // Poll every 60s
+    const interval = setInterval(fetchAlerts, 60000); 
     return () => clearInterval(interval);
   }, [fetchAlerts]);
 
-  const markAsRead = async (id: number) => {
+  const handleNotificationClick = async (alert: any) => {
+    // 1. Mark as read in the database
     try {
       const token = localStorage.getItem('appManagerToken');
-      await fetch(`${API_URL}/api/notifications/${id}/read`, {
+      await fetch(`${API_URL}/api/notifications/${alert.id}/read`, {
         method: 'PUT',
         headers: { 'Authorization': `Bearer ${token}` }
       });
-      setAlerts(alerts.filter(a => a.id !== id));
+      setAlerts(alerts.filter(a => a.id !== alert.id));
     } catch (err) {
       console.error("Failed to mark as read");
+    }
+
+    // 2. Close the dropdown menu
+    setIsOpen(false);
+
+    // 3. PRECISION ROUTING: Send the user to the exact tab where the action card lives
+    const title = alert.title.toLowerCase();
+    
+    if (title.includes('vetting approved')) {
+      // PMO needs to fund it. Take them directly to the Subscriptions tab.
+      onNavigate('subscriptions'); 
+    } else if (title.includes('architecture request') || title.includes('veto')) {
+      // EA needs to vet it, or a user needs to see their rejection.
+      onNavigate('catalog'); // *Note: Change this to 'ea-strategy' if that is where your vetting UI is!
+    } else if (title.includes('provisioning') || title.includes('rollout')) {
+      // Networks and Apps teams have their queues on the main dashboard.
+      onNavigate('dashboard');
+    } else if (title.includes('go-live')) {
+      // Department Heads check their active software in Subscriptions.
+      onNavigate('subscriptions');
+    } else {
+      onNavigate('dashboard');
     }
   };
 
@@ -239,7 +262,7 @@ const NotificationBell = () => {
                 <div 
                   key={alert.id} 
                   className="p-4 border-b border-gray-100 hover:bg-blue-50/50 flex justify-between items-start cursor-pointer transition-colors group" 
-                  onClick={() => markAsRead(alert.id)}
+                  onClick={() => handleNotificationClick(alert)}
                 >
                   <div className="flex-1 pr-4">
                     <p className="text-sm font-bold text-gray-900 group-hover:text-blue-700 transition-colors">{alert.title}</p>
@@ -983,7 +1006,7 @@ const Index = () => {
           <div className="flex items-center space-x-3 shrink-0">
             <div className="flex items-center space-x-2">
               
-              <NotificationBell />
+            <NotificationBell onNavigate={setActiveTab} />
 
               {activeTab === 'dashboard' && (
                 <Button

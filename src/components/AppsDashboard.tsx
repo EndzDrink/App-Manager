@@ -2,10 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { MetricCard } from "@/components/MetricCard";
 import { 
   Activity, Server, AlertTriangle, CheckCircle2, 
-  Zap, Clock, ShieldAlert, ArrowUpRight, ArrowDownRight, RefreshCw, XCircle
+  Zap, Clock, ShieldAlert, ArrowUpRight, RefreshCw, XCircle, KeyRound, PlayCircle
 } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 interface AppsDashboardProps {
   systems: any[];
@@ -14,24 +16,40 @@ interface AppsDashboardProps {
 export const AppsDashboard: React.FC<AppsDashboardProps> = ({ systems }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [healthData, setHealthData] = useState<any[]>([]);
-  
-  // NEW: State to track which metric filter is active
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
 
-  // Simulate fetching live telemetry data for the systems
+  // NEW: State for the Provisioning Queue
+  const [pendingIntegration, setPendingIntegration] = useState<any[]>([]);
+
+  const fetchSubscriptions = async () => {
+    try {
+      const token = localStorage.getItem('appManagerToken');
+      const res = await fetch(`${API_URL}/api/subscriptions`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Filter for subscriptions that Networks has secured, but Apps hasn't integrated yet
+        setPendingIntegration(data.filter((sub: any) => sub.network_status === 'Secured' && sub.integration_status === 'Pending'));
+      }
+    } catch (err) {
+      console.error("Failed to fetch integration queue");
+    }
+  };
+
   const fetchTelemetry = () => {
     setIsRefreshing(true);
+    fetchSubscriptions(); // Fetch the queue alongside the telemetry
     setTimeout(() => {
       const enrichedData = systems.map(sys => {
-        // Simulating realistic health metrics
         const randomSeed = Math.random();
         let status = 'Operational';
-        let latency = Math.floor(Math.random() * 150) + 20; // 20ms to 170ms
+        let latency = Math.floor(Math.random() * 150) + 20; 
         let uptime = 99.9;
 
         if (randomSeed > 0.85 && randomSeed <= 0.95) {
           status = 'Degraded';
-          latency = Math.floor(Math.random() * 800) + 300; // 300ms to 1100ms
+          latency = Math.floor(Math.random() * 800) + 300; 
           uptime = 98.4;
         } else if (randomSeed > 0.95) {
           status = 'Down';
@@ -41,7 +59,6 @@ export const AppsDashboard: React.FC<AppsDashboardProps> = ({ systems }) => {
 
         return { ...sys, status, latency, uptime, requests: Math.floor(Math.random() * 50000) + 1000 };
       }).sort((a, b) => {
-        // Sort to put Down/Degraded at the top
         if (a.status === 'Down') return -1;
         if (b.status === 'Down') return 1;
         if (a.status === 'Degraded') return -1;
@@ -58,33 +75,40 @@ export const AppsDashboard: React.FC<AppsDashboardProps> = ({ systems }) => {
     if (systems.length > 0) fetchTelemetry();
   }, [systems]);
 
+  // --- NEW: ACTION HANDLER FOR APPS PROVISIONING ---
+  const handleIntegrationClearance = async (id: number) => {
+    try {
+      const token = localStorage.getItem('appManagerToken');
+      const res = await fetch(`${API_URL}/api/provisioning/integration/${id}`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        // Remove from local queue instantly for snappy UI
+        setPendingIntegration(prev => prev.filter(sub => sub.id !== id));
+      }
+    } catch (err) {
+      console.error("Failed to process integration");
+    }
+  };
+
   // ----------------------------------------------------------------
   // MEMOIZED COMPUTATIONS & FILTERING
   // ----------------------------------------------------------------
-  
   const downSystems = useMemo(() => healthData.filter(s => s.status === 'Down').length, [healthData]);
   const degradedSystems = useMemo(() => healthData.filter(s => s.status === 'Degraded').length, [healthData]);
   const avgLatency = useMemo(() => healthData.length ? Math.floor(healthData.reduce((acc, curr) => acc + curr.latency, 0) / healthData.filter(s => s.status !== 'Down').length) : 0, [healthData]);
   
-  // Filter the data table based on the activeFilter state
   const displayedHealthData = useMemo(() => {
     if (!activeFilter) return healthData;
     if (activeFilter === 'incidents') return healthData.filter(s => s.status === 'Down' || s.status === 'Degraded');
     return healthData;
   }, [healthData, activeFilter]);
 
-  // ----------------------------------------------------------------
-  // ACTIONS
-  // ----------------------------------------------------------------
-  
-  // Toggles the active filter state when a metric card is clicked
   const handleFilterToggle = (filterType: string) => {
     setActiveFilter(prev => prev === filterType ? null : filterType);
   };
 
-  // ----------------------------------------------------------------
-  // RENDER HELPERS
-  // ----------------------------------------------------------------
   const getStatusBadge = (status: string) => {
     switch(status) {
       case 'Operational': return <span className="bg-green-100 text-green-700 border border-green-200 px-2 py-1 rounded text-[10px] font-bold uppercase flex items-center"><CheckCircle2 className="h-3 w-3 mr-1"/> Operational</span>;
@@ -94,17 +118,12 @@ export const AppsDashboard: React.FC<AppsDashboardProps> = ({ systems }) => {
     }
   };
 
-  // Helper function to render a clickable metric card with conditional active styling
   const InteractiveMetricCard = ({ title, value, subtitle, icon, filterKey }: any) => {
     const isActive = activeFilter === filterKey;
     return (
       <div 
         onClick={() => filterKey && handleFilterToggle(filterKey)}
-        className={`cursor-pointer transition-all duration-200 h-full ${
-          isActive 
-            ? 'ring-2 ring-blue-500 scale-[1.02] shadow-md z-10 relative rounded-xl' 
-            : 'hover:scale-[1.01] hover:shadow-sm'
-        }`}
+        className={`cursor-pointer transition-all duration-200 h-full ${isActive ? 'ring-2 ring-blue-500 scale-[1.02] shadow-md z-10 relative rounded-xl' : 'hover:scale-[1.01] hover:shadow-sm'}`}
       >
         <MetricCard icon={icon} title={title} value={value} subtitle={subtitle} />
         {isActive && (
@@ -124,9 +143,9 @@ export const AppsDashboard: React.FC<AppsDashboardProps> = ({ systems }) => {
         <div>
           <h2 className="text-xl font-bold text-gray-900 flex items-center tracking-tight">
             <Activity className="h-6 w-6 mr-2 text-blue-600" />
-            Performance & Uptime Telemetry
+            Performance & Integration Telemetry
           </h2>
-          <p className="text-xs text-gray-500 mt-1 font-medium">Live application health monitoring for IMU Operations</p>
+          <p className="text-xs text-gray-500 mt-1 font-medium">Live application health monitoring and integration provisioning</p>
         </div>
         <div className="flex gap-3">
           {activeFilter && (
@@ -134,12 +153,7 @@ export const AppsDashboard: React.FC<AppsDashboardProps> = ({ systems }) => {
               Clear Filters
             </Button>
           )}
-          <Button 
-            onClick={fetchTelemetry} 
-            disabled={isRefreshing}
-            variant="outline" 
-            className="bg-white text-blue-900 border-gray-200 hover:bg-gray-50 hover:text-blue-700 font-bold shadow-sm"
-          >
+          <Button onClick={fetchTelemetry} disabled={isRefreshing} variant="outline" className="bg-white text-blue-900 border-gray-200 hover:bg-gray-50 hover:text-blue-700 font-bold shadow-sm">
             <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin text-blue-500' : ''}`} />
             {isRefreshing ? 'Pinging APIs...' : 'Refresh Telemetry'}
           </Button>
@@ -148,46 +162,44 @@ export const AppsDashboard: React.FC<AppsDashboardProps> = ({ systems }) => {
 
       {/* METRICS ROW */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6 shrink-0">
-        <InteractiveMetricCard 
-          icon={<Server className="h-5 w-5" />} 
-          title="Monitored Apps" 
-          value={healthData.length.toString()} 
-          subtitle="Registered in Catalog" 
-          filterKey={null}
-        />
-        <InteractiveMetricCard 
-          icon={<AlertTriangle className={`h-5 w-5 ${(downSystems > 0 || degradedSystems > 0) ? 'text-red-500' : 'text-gray-400'}`} />} 
-          title="Active Incidents" 
-          value={downSystems > 0 || degradedSystems > 0 ? (downSystems + degradedSystems).toString() : "0"} 
-          subtitle={
-            <div className="flex gap-2 text-[10px] font-bold mt-1.5">
-              <span className={downSystems > 0 ? "text-red-600" : "text-gray-400"}>{downSystems} Down</span>|
-              <span className={degradedSystems > 0 ? "text-orange-600" : "text-gray-400"}>{degradedSystems} Degraded</span>
-            </div>
-          } 
-          filterKey="incidents"
-        />
-        <div className="h-full">
-           {/* Not filtering by latency for now */}
-          <MetricCard 
-            icon={<Zap className={`h-5 w-5 ${avgLatency > 500 ? 'text-red-500' : 'text-yellow-500'}`} />} 
-            title="Avg API Latency" 
-            value={`${avgLatency}ms`} 
-            subtitle={<span className={avgLatency > 500 ? 'text-red-500 font-bold text-[10px]' : 'text-green-600 font-bold text-[10px]'}>{avgLatency > 500 ? 'Poor Performance' : 'Optimal'}</span>} 
-          />
-        </div>
-        <div className="h-full">
-          <MetricCard 
-            icon={<Activity className="h-5 w-5 text-blue-500" />} 
-            title="Traffic (24h)" 
-            value="1.4M" 
-            subtitle={<span className="flex items-center text-green-600 font-bold text-[10px]"><ArrowUpRight className="h-3 w-3 mr-1"/> 12% vs Yesterday</span>} 
-          />
-        </div>
+        <InteractiveMetricCard icon={<Server className="h-5 w-5" />} title="Monitored Apps" value={healthData.length.toString()} subtitle="Registered in Catalog" filterKey={null} />
+        <InteractiveMetricCard icon={<AlertTriangle className={`h-5 w-5 ${(downSystems > 0 || degradedSystems > 0) ? 'text-red-500' : 'text-gray-400'}`} />} title="Active Incidents" value={downSystems > 0 || degradedSystems > 0 ? (downSystems + degradedSystems).toString() : "0"} subtitle={<div className="flex gap-2 text-[10px] font-bold mt-1.5"><span className={downSystems > 0 ? "text-red-600" : "text-gray-400"}>{downSystems} Down</span>|<span className={degradedSystems > 0 ? "text-orange-600" : "text-gray-400"}>{degradedSystems} Degraded</span></div>} filterKey="incidents" />
+        <div className="h-full"><MetricCard icon={<Zap className={`h-5 w-5 ${avgLatency > 500 ? 'text-red-500' : 'text-yellow-500'}`} />} title="Avg API Latency" value={`${avgLatency}ms`} subtitle={<span className={avgLatency > 500 ? 'text-red-500 font-bold text-[10px]' : 'text-green-600 font-bold text-[10px]'}>{avgLatency > 500 ? 'Poor Performance' : 'Optimal'}</span>} /></div>
+        <div className="h-full"><MetricCard icon={<Activity className="h-5 w-5 text-blue-500" />} title="Traffic (24h)" value="1.4M" subtitle={<span className="flex items-center text-green-600 font-bold text-[10px]"><ArrowUpRight className="h-3 w-3 mr-1"/> 12% vs Yesterday</span>} /></div>
       </div>
 
+      {/* NEW: PENDING INTEGRATION QUEUE */}
+      {pendingIntegration.length > 0 && (
+        <Card className="bg-white border border-purple-200 shadow-sm mb-6 shrink-0 overflow-hidden animate-in slide-in-from-top-4">
+          <div className="p-4 border-b border-purple-100 bg-purple-50/80 flex justify-between items-center">
+            <h3 className="text-sm font-bold text-purple-900 uppercase tracking-wider flex items-center">
+              <Server className="h-4 w-4 mr-2 text-purple-600" />
+              Pending Integration & Rollout
+            </h3>
+            <span className="bg-purple-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{pendingIntegration.length} Items</span>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {pendingIntegration.map(sub => (
+              <div key={sub.id} className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                <div>
+                  <h4 className="font-bold text-gray-900 text-sm">{sub.name} <span className="ml-2 text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{sub.category}</span></h4>
+                  <p className="text-[10px] text-gray-500 mt-1 uppercase tracking-widest">Network Secured • Awaiting SSO Federation & UAT</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={() => handleIntegrationClearance(sub.id)} className="bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs h-8 shadow-sm">
+                    <KeyRound className="h-3 w-3 mr-2" /> Federate SSO
+                  </Button>
+                  <Button onClick={() => handleIntegrationClearance(sub.id)} className="bg-green-600 hover:bg-green-700 text-white font-bold text-xs h-8 shadow-sm">
+                    <PlayCircle className="h-3 w-3 mr-2" /> Sign-off Go-Live
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 flex-1 min-h-0">
-        
         {/* LEFT COLUMN: System Health Matrix */}
         <Card className="xl:col-span-2 bg-white border border-gray-200 shadow-sm flex flex-col h-full overflow-hidden">
           <div className="p-4 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center shrink-0">
@@ -220,9 +232,7 @@ export const AppsDashboard: React.FC<AppsDashboardProps> = ({ systems }) => {
                         {sys.deployment_type || 'External SaaS'}
                       </span>
                     </td>
-                    <td className="py-3 px-4">
-                      {getStatusBadge(sys.status)}
-                    </td>
+                    <td className="py-3 px-4">{getStatusBadge(sys.status)}</td>
                     <td className="py-3 px-4">
                       {sys.status === 'Down' ? (
                         <span className="text-[10px] font-black uppercase tracking-widest text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200">Timeout</span>
@@ -230,18 +240,13 @@ export const AppsDashboard: React.FC<AppsDashboardProps> = ({ systems }) => {
                         <div className="flex flex-col">
                           <span className={`text-[10px] font-black ${sys.latency > 500 ? 'text-orange-600' : 'text-gray-700'}`}>{sys.latency}ms</span>
                           <div className="w-24 h-1.5 bg-gray-100 rounded-full mt-1 overflow-hidden shadow-inner border border-gray-200">
-                            <div 
-                              className={`h-full rounded-full transition-all duration-1000 ${sys.latency > 500 ? 'bg-orange-500' : 'bg-green-500'}`} 
-                              style={{ width: `${Math.min((sys.latency / 1000) * 100, 100)}%` }}
-                            ></div>
+                            <div className={`h-full rounded-full transition-all duration-1000 ${sys.latency > 500 ? 'bg-orange-500' : 'bg-green-500'}`} style={{ width: `${Math.min((sys.latency / 1000) * 100, 100)}%` }}></div>
                           </div>
                         </div>
                       )}
                     </td>
                     <td className="py-3 px-6 text-right">
-                      <span className={`text-sm font-black ${sys.uptime < 99.0 ? 'text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200' : 'text-gray-800'}`}>
-                        {sys.uptime}%
-                      </span>
+                      <span className={`text-sm font-black ${sys.uptime < 99.0 ? 'text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200' : 'text-gray-800'}`}>{sys.uptime}%</span>
                     </td>
                   </tr>
                 ))}
@@ -277,9 +282,7 @@ export const AppsDashboard: React.FC<AppsDashboardProps> = ({ systems }) => {
                 healthData.filter(s => s.status !== 'Operational').map(sys => (
                   <div key={`alert-${sys.id}`} className={`p-4 rounded-xl border shadow-sm hover:shadow-md transition-shadow ${sys.status === 'Down' ? 'bg-white border-red-200' : 'bg-white border-orange-200'}`}>
                     <div className="flex justify-between items-start mb-2">
-                      <span className={`font-bold text-sm ${sys.status === 'Down' ? 'text-red-900' : 'text-orange-900'}`}>
-                        {sys.name}
-                      </span>
+                      <span className={`font-bold text-sm ${sys.status === 'Down' ? 'text-red-900' : 'text-orange-900'}`}>{sys.name}</span>
                       <span className="text-[9px] text-gray-400 flex items-center uppercase font-black tracking-widest bg-gray-50 px-1.5 py-0.5 rounded border border-gray-100">
                         <Clock className="h-3 w-3 mr-1" /> Just now
                       </span>

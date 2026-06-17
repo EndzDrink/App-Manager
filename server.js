@@ -224,7 +224,9 @@ app.get('/api/subscriptions', authenticateToken, async (req, res, next) => {
         COALESCE(es.functional_category, 'Uncategorized') as category, 
         s.monthly_cost as price, 
         TO_CHAR(s.start_date, 'YYYY-MM-DD') as start_date, 
-        s.associated_project as project_name
+        s.associated_project as project_name,
+        s.network_status,
+        s.integration_status
       FROM active_subscriptions s 
       LEFT JOIN enterprise_systems es ON s.system_id = es.id 
       WHERE s.is_revoked IS NOT TRUE
@@ -252,8 +254,8 @@ app.post('/api/subscriptions', authenticateToken, async (req, res, next) => {
     if (assigned_user_id) {
       await pool.query(
         `INSERT INTO active_subscriptions 
-         (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked) 
-         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, FALSE)`,
+         (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked, network_status, integration_status) 
+         VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, FALSE, 'Pending', 'Pending')`,
         [system_id, department_id || 1, assigned_user_id, monthly_cost || 0, associated_project || 'Operational']
       );
       
@@ -275,8 +277,8 @@ app.post('/api/subscriptions', authenticateToken, async (req, res, next) => {
         for (let req of pendingReqs.rows) {
           await pool.query(
             `INSERT INTO active_subscriptions 
-             (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked) 
-             VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, FALSE)`,
+             (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked, network_status, integration_status) 
+             VALUES ($1, $2, $3, $4, $5, CURRENT_DATE, FALSE, 'Pending', 'Pending')`,
             [system_id, department_id || 1, req.user_id, monthly_cost || 0, associated_project || 'Automated CRM Fulfillment']
           );
           await pool.query(`UPDATE license_requests SET status = 'Fulfilled' WHERE id = $1`, [req.id]);
@@ -285,8 +287,8 @@ app.post('/api/subscriptions', authenticateToken, async (req, res, next) => {
       } else {
         await pool.query(
           `INSERT INTO active_subscriptions 
-           (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked) 
-           VALUES ($1, $2, NULL, $3, $4, CURRENT_DATE, FALSE)`,
+           (system_id, owning_department_id, assigned_user_id, monthly_cost, associated_project, start_date, is_revoked, network_status, integration_status) 
+           VALUES ($1, $2, NULL, $3, $4, CURRENT_DATE, FALSE, 'Pending', 'Pending')`,
           [system_id, department_id || 1, monthly_cost || 0, associated_project || 'Operational Pool']
         );
       }
@@ -295,6 +297,12 @@ app.post('/api/subscriptions', authenticateToken, async (req, res, next) => {
     await pool.query(
       `INSERT INTO usage_logs (user_id, app_id, action, duration_minutes) VALUES ($1, $2, $3, 0)`,
       [operatorId, system_id, `PROCUREMENT: New software license allocation for system ID ${system_id} explicitly provisioned and assigned.`]
+    );
+
+    // --- NEW: TRIGGER CHAIN REACTION TO NETWORKS TEAM ---
+    await pool.query(
+      `INSERT INTO notifications (target_role, title, message, alert_type) VALUES ($1, $2, $3, $4)`,
+      ['NetworksHead', 'Infrastructure Provisioning Required', `System ID ${system_id} has been funded. Pending firewall and network security sign-off.`, 'warning']
     );
 
     await pool.query('COMMIT');
@@ -522,16 +530,24 @@ app.post('/api/connectors/:id/sync', authenticateToken, async (req, res, next) =
 app.get('/api/notifications', authenticateToken, async (req, res, next) => {
   const { role, deptId, id } = req.user;
   try {
-    // Fetch notifications aimed at the exact user, their department, or their global role (e.g. all 'EA' users)
-    const result = await pool.query(
-      `SELECT * FROM notifications 
-       WHERE is_read = FALSE 
-       AND (target_role = $1 OR target_dept_id = $2 OR target_user_id = $3)
-       ORDER BY created_at DESC`,
-      [role, deptId, id]
-    );
+    let query = `SELECT * FROM notifications WHERE is_read = FALSE`;
+    let params = [];
+
+    // If the user is NOT a SuperAdmin, strictly filter by their specific role, dept, or ID
+    if (role !== 'SuperAdmin') {
+      query += ` AND (target_role = $1 OR target_dept_id = $2 OR target_user_id = $3)`;
+      // Force undefined values to NULL to prevent pg driver crash
+      params = [role || 'StandardUser', deptId || null, id || null];
+    }
+    
+    query += ` ORDER BY created_at DESC`;
+
+    const result = await pool.query(query, params);
     res.json(result.rows);
-  } catch (err) { next(err); }
+  } catch (err) { 
+    console.error("NOTIFICATION DB ERROR:", err.message);
+    next(err); 
+  }
 });
 
 app.put('/api/notifications/:id/read', authenticateToken, async (req, res, next) => {
@@ -542,6 +558,15 @@ app.put('/api/notifications/:id/read', authenticateToken, async (req, res, next)
 });
 
 // --- 10. EA GOVERNANCE, PMO & CRM PIPELINES ---
+app.get('/api/projects/pipeline', authenticateToken, async (req, res, next) => {
+  try {
+    const r = await pool.query(`SELECT * FROM pmo_projects ORDER BY created_at DESC`);
+    res.json(r.rows);
+  } catch (err) {
+    next(err);
+  }
+});
+
 app.post('/api/pmo/escalate', authenticateToken, async (req, res, next) => {
   const { project_id, reason } = req.body;
   const userId = req.user.id || null; 
@@ -641,9 +666,104 @@ app.put('/api/requests/:id/vetting', authenticateToken, async (req, res, next) =
 
     if (updateFields.length === 0) return res.status(400).json({ error: "No valid operational update elements provided." });
     params.push(cleanId);
+    
+    // 1. Update the database record
     await pool.query(`UPDATE license_requests SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`, params);
+
+    // 2. TRIGGER AUTOMATED CHAIN REACTION NOTIFICATIONS
+    if (ea_status === 'Approved') {
+      // Notify PMO that it's their turn
+      await pool.query(
+        `INSERT INTO notifications (target_role, title, message, alert_type) VALUES ($1, $2, $3, $4)`,
+        ['PMOLead', 'EA Vetting Approved', `Architecture approved Request REQ-${cleanId}. It is ready for PMO pipeline scoping and funding allocation.`, 'info']
+      );
+    } else if (ea_status === 'Vetoed') {
+      // Notify the Department Head that their request was blocked
+      await pool.query(
+        `INSERT INTO notifications (target_role, title, message, alert_type) VALUES ($1, $2, $3, $4)`,
+        ['DepartmentHead', 'Architecture Veto', `Request REQ-${cleanId} was vetoed by Enterprise Architecture due to non-compliance.`, 'warning']
+      );
+    }
+
     res.json({ success: true, triggerTelemetryUpdate: true, message: `Request updated successfully.` });
-  } catch (err) { next(err); }
+  } catch (err) { 
+    next(err); 
+  }
+});
+
+// --- 10.5 NETWORKS & APPS PROVISIONING (ASSEMBLY LINE) ---
+app.put('/api/provisioning/network/:id', authenticateToken, async (req, res, next) => {
+  const { id } = req.params;
+  const operatorId = req.user.id || null;
+
+  if (!['SuperAdmin', 'NetworksHead'].includes(req.user.role)) {
+    return res.status(403).json({ error: "Access Denied: Network Provisioning Restricted." });
+  }
+
+  try {
+    await pool.query('BEGIN');
+    
+    await pool.query(
+      `UPDATE active_subscriptions SET network_status = 'Secured' WHERE id = $1`,
+      [id]
+    );
+
+    await pool.query(
+      `INSERT INTO usage_logs (user_id, action, duration_minutes) VALUES ($1, $2, 0)`,
+      [operatorId, `SECURITY CLEARANCE: Subscription ID ${id} network perimeter secured and whitelisted.`]
+    );
+
+    // Trigger chain reaction to Apps
+    await pool.query(
+      `INSERT INTO notifications (target_role, title, message, alert_type) VALUES ($1, $2, $3, $4)`,
+      ['ApplicationsHead', 'Integration Rollout Pending', `Subscription ID ${id} network secured. Awaiting Entra ID SSO and DB integration.`, 'info']
+    );
+
+    await pool.query('COMMIT');
+    res.json({ success: true, message: "Network perimeter secured. Integration team notified." });
+  } catch (err) {
+    await pool.query('ROLLBACK');
+    next(err);
+  }
+});
+
+app.put('/api/provisioning/integration/:id', authenticateToken, async (req, res, next) => {
+  const { id } = req.params;
+  const operatorId = req.user.id || null;
+
+  if (!['SuperAdmin', 'ApplicationsHead'].includes(req.user.role)) {
+    return res.status(403).json({ error: "Access Denied: Applications Integration Restricted." });
+  }
+
+  try {
+    await pool.query('BEGIN');
+    
+    const subRes = await pool.query(
+      `UPDATE active_subscriptions SET integration_status = 'Live' WHERE id = $1 RETURNING owning_department_id, system_id`,
+      [id]
+    );
+
+    if (subRes.rowCount > 0) {
+        const deptId = subRes.rows[0].owning_department_id;
+        
+        await pool.query(
+          `INSERT INTO usage_logs (user_id, action, duration_minutes) VALUES ($1, $2, 0)`,
+          [operatorId, `INTEGRATION COMPLETE: Subscription ID ${id} is federated and Live.`]
+        );
+
+        // Notify Department Head that their software is ready
+        await pool.query(
+          `INSERT INTO notifications (target_dept_id, target_role, title, message, alert_type) VALUES ($1, $2, $3, $4, $5)`,
+          [deptId, 'DepartmentHead', 'Software Go-Live', `System ID ${subRes.rows[0].system_id} has passed UAT and is officially Live for your department.`, 'success']
+        );
+    }
+
+    await pool.query('COMMIT');
+    res.json({ success: true, message: "System integration completed and set to Live." });
+  } catch (err) {
+    await pool.query('ROLLBACK');
+    next(err);
+  }
 });
 
 // --- 11. CENTRALIZED ERROR HANDLER ---

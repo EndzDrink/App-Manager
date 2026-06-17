@@ -80,9 +80,20 @@ export const initializeSystems = async () => {
         monthly_cost DECIMAL DEFAULT 0.00,
         associated_project VARCHAR(255),
         start_date DATE DEFAULT CURRENT_DATE,
-        is_revoked BOOLEAN DEFAULT FALSE
+        is_revoked BOOLEAN DEFAULT FALSE,
+        network_status VARCHAR(50) DEFAULT 'Pending',
+        integration_status VARCHAR(50) DEFAULT 'Pending'
       );
     `);
+
+    // --- NEW: ENSURE THE DEPLOYMENT TRACKING COLUMNS EXIST ---
+    const subColumns = [
+      { name: 'network_status', type: "VARCHAR(50) DEFAULT 'Pending'" },
+      { name: 'integration_status', type: "VARCHAR(50) DEFAULT 'Pending'" }
+    ];
+    for (const col of subColumns) {
+      await pool.query(`ALTER TABLE active_subscriptions ADD COLUMN IF NOT EXISTS ${col.name} ${col.type}`);
+    }
 
     await pool.query(`
       CREATE TABLE IF NOT EXISTS license_requests (
@@ -146,7 +157,6 @@ export const initializeSystems = async () => {
     `);
     await pool.query(`ALTER TABLE usage_logs ADD COLUMN IF NOT EXISTS created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP`);
 
-    // --- NEW: IN-APP NOTIFICATIONS TABLE ---
     await pool.query(`
       CREATE TABLE IF NOT EXISTS notifications (
         id SERIAL PRIMARY KEY,
@@ -177,7 +187,7 @@ export const initializeSystems = async () => {
     await pool.query(`INSERT INTO admin_users (email, password_hash, role) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING`, ['admin@organization.com', hashedPassword, 'SuperAdmin']);
     await pool.query(`INSERT INTO settings (id, monthly_budget) VALUES (1, 150000.00) ON CONFLICT (id) DO NOTHING`);
 
-    console.log("✅ Database Schema Verified & Hardened with SEAM Constraints (Notifications Active).");
+    console.log("✅ Database Schema Verified & Hardened with SEAM Constraints (Deployment Pipeline Active).");
   } catch (err) { 
     console.error("❌ DB Initialization failed:", err.message); 
   }

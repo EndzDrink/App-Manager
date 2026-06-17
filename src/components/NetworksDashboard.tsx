@@ -2,10 +2,12 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { MetricCard } from "@/components/MetricCard";
 import { 
   Network, Wifi, Activity, AlertTriangle, 
-  ArrowDownUp, Server, ShieldCheck, RefreshCw, Zap, XCircle
+  ArrowDownUp, Server, ShieldCheck, RefreshCw, Zap, XCircle, CheckCircle2, Lock
 } from 'lucide-react';
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+
+const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 interface NetworksDashboardProps {
   systems: any[];
@@ -14,33 +16,46 @@ interface NetworksDashboardProps {
 export const NetworksDashboard: React.FC<NetworksDashboardProps> = ({ systems }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [networkData, setNetworkData] = useState<any[]>([]);
-  
-  // NEW: State to track which metric filter is active
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
+  
+  // NEW: State for the Provisioning Queue
+  const [pendingProvisioning, setPendingProvisioning] = useState<any[]>([]);
 
-  // Simulate Network Telemetry Data
+  const fetchSubscriptions = async () => {
+    try {
+      const token = localStorage.getItem('appManagerToken');
+      const res = await fetch(`${API_URL}/api/subscriptions`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        const data = await res.json();
+        // Filter for subscriptions that PMO just funded but Networks hasn't secured yet
+        setPendingProvisioning(data.filter((sub: any) => sub.network_status === 'Pending'));
+      }
+    } catch (err) {
+      console.error("Failed to fetch provisioning queue");
+    }
+  };
+
   const fetchNetworkStats = () => {
     setIsRefreshing(true);
+    fetchSubscriptions(); // Fetch the queue alongside the telemetry
     setTimeout(() => {
       const enrichedData = systems.map(sys => {
         const randomSeed = Math.random();
-        
-        // Base metrics
-        let bandwidth = Math.floor(Math.random() * 800) + 50; // Mbps
-        let latency = Math.floor(Math.random() * 40) + 5; // ms (internal usually fast)
+        let bandwidth = Math.floor(Math.random() * 800) + 50; 
+        let latency = Math.floor(Math.random() * 40) + 5; 
         let endpoints = Math.floor(Math.random() * 5000) + 100;
         let status = 'Nominal';
 
-        // Adjust for external SaaS vs Internal
         if (sys.deployment_type === 'External SaaS' || !sys.deployment_type) {
-          latency += Math.floor(Math.random() * 60) + 20; // higher latency for cloud
-          bandwidth = Math.floor(Math.random() * 1500) + 200; // higher bandwidth
+          latency += Math.floor(Math.random() * 60) + 20; 
+          bandwidth = Math.floor(Math.random() * 1500) + 200; 
         }
 
-        // Create anomalies
         if (randomSeed > 0.90) {
           status = 'High Load';
-          bandwidth *= 3; // Spike
+          bandwidth *= 3; 
           latency += 150;
         } else if (randomSeed > 0.97) {
           status = 'Critical Bottleneck';
@@ -49,7 +64,7 @@ export const NetworksDashboard: React.FC<NetworksDashboardProps> = ({ systems })
         }
 
         return { ...sys, bandwidth, latency, endpoints, status };
-      }).sort((a, b) => b.bandwidth - a.bandwidth); // Sort by highest bandwidth usage
+      }).sort((a, b) => b.bandwidth - a.bandwidth); 
 
       setNetworkData(enrichedData);
       setIsRefreshing(false);
@@ -60,35 +75,41 @@ export const NetworksDashboard: React.FC<NetworksDashboardProps> = ({ systems })
     if (systems.length > 0) fetchNetworkStats();
   }, [systems]);
 
+  // --- NEW: ACTION HANDLER FOR NETWORKS PROVISIONING ---
+  const handleNetworkClearance = async (id: number) => {
+    try {
+      const token = localStorage.getItem('appManagerToken');
+      const res = await fetch(`${API_URL}/api/provisioning/network/${id}`, {
+        method: 'PUT',
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (res.ok) {
+        // Remove from local queue instantly for snappy UI
+        setPendingProvisioning(prev => prev.filter(sub => sub.id !== id));
+      }
+    } catch (err) {
+      console.error("Failed to provision network");
+    }
+  };
+
   // ----------------------------------------------------------------
   // MEMOIZED COMPUTATIONS & FILTERING
   // ----------------------------------------------------------------
-  
   const totalBandwidth = useMemo(() => networkData.reduce((acc, curr) => acc + curr.bandwidth, 0) / 1000, [networkData]);
   const criticalNodes = useMemo(() => networkData.filter(s => s.status === 'Critical Bottleneck').length, [networkData]);
   const highLoadNodes = useMemo(() => networkData.filter(s => s.status === 'High Load').length, [networkData]);
   const totalEndpoints = useMemo(() => networkData.reduce((acc, curr) => acc + curr.endpoints, 0), [networkData]);
   
-  // 2. Filter the data table based on the activeFilter state
   const displayedNetworkData = useMemo(() => {
     if (!activeFilter) return networkData;
     if (activeFilter === 'anomalies') return networkData.filter(s => s.status === 'Critical Bottleneck' || s.status === 'High Load');
     return networkData;
   }, [networkData, activeFilter]);
 
-  // ----------------------------------------------------------------
-  // ACTIONS
-  // ----------------------------------------------------------------
-  
-  // Toggles the active filter state when a metric card is clicked
   const handleFilterToggle = (filterType: string) => {
     setActiveFilter(prev => prev === filterType ? null : filterType);
   };
 
-
-  // ----------------------------------------------------------------
-  // RENDER HELPERS
-  // ----------------------------------------------------------------
   const getStatusBadge = (status: string) => {
     switch(status) {
       case 'Nominal': return <span className="bg-green-100 text-green-700 border-green-200 px-2 py-1 rounded text-[10px] font-bold uppercase flex items-center w-max"><ShieldCheck className="h-3 w-3 mr-1"/> Stable</span>;
@@ -98,17 +119,12 @@ export const NetworksDashboard: React.FC<NetworksDashboardProps> = ({ systems })
     }
   };
 
-  // Helper function to render a clickable metric card with conditional active styling
   const InteractiveMetricCard = ({ title, value, subtitle, icon, filterKey }: any) => {
     const isActive = activeFilter === filterKey;
     return (
       <div 
         onClick={() => filterKey && handleFilterToggle(filterKey)}
-        className={`cursor-pointer transition-all duration-200 h-full ${
-          isActive 
-            ? 'ring-2 ring-blue-500 scale-[1.02] shadow-md z-10 relative rounded-xl' 
-            : 'hover:scale-[1.01] hover:shadow-sm'
-        }`}
+        className={`cursor-pointer transition-all duration-200 h-full ${isActive ? 'ring-2 ring-blue-500 scale-[1.02] shadow-md z-10 relative rounded-xl' : 'hover:scale-[1.01] hover:shadow-sm'}`}
       >
         <MetricCard icon={icon} title={title} value={value} subtitle={subtitle} />
         {isActive && (
@@ -128,9 +144,9 @@ export const NetworksDashboard: React.FC<NetworksDashboardProps> = ({ systems })
         <div>
           <h2 className="text-xl font-bold text-gray-900 flex items-center tracking-tight">
             <Network className="h-6 w-6 mr-2 text-blue-600" />
-            Network Topology & Impact
+            Network Topology & Infrastructure
           </h2>
-          <p className="text-xs text-gray-500 mt-1 font-medium">Real-time bandwidth utilization and infrastructure health</p>
+          <p className="text-xs text-gray-500 mt-1 font-medium">Real-time bandwidth utilization, provisioning, and infrastructure health</p>
         </div>
         <div className="flex gap-3">
           {activeFilter && (
@@ -138,12 +154,7 @@ export const NetworksDashboard: React.FC<NetworksDashboardProps> = ({ systems })
               Clear Filters
             </Button>
           )}
-          <Button 
-            onClick={fetchNetworkStats} 
-            disabled={isRefreshing}
-            variant="outline" 
-            className="bg-white text-blue-900 border-gray-200 hover:bg-gray-50 hover:text-blue-700 font-bold shadow-sm"
-          >
+          <Button onClick={fetchNetworkStats} disabled={isRefreshing} variant="outline" className="bg-white text-blue-900 border-gray-200 hover:bg-gray-50 hover:text-blue-700 font-bold shadow-sm">
             <RefreshCw className={`h-4 w-4 mr-2 ${isRefreshing ? 'animate-spin text-blue-500' : ''}`} />
             {isRefreshing ? 'Scanning...' : 'Refresh Topology'}
           </Button>
@@ -152,46 +163,41 @@ export const NetworksDashboard: React.FC<NetworksDashboardProps> = ({ systems })
 
       {/* METRICS ROW */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-6 shrink-0">
-        <InteractiveMetricCard 
-          icon={<ArrowDownUp className="h-5 w-5 text-blue-500" />} 
-          title="Total Throughput" 
-          value={`${totalBandwidth.toFixed(2)} Gbps`} 
-          subtitle="Combined system payload"
-          filterKey={null}
-        />
-        <InteractiveMetricCard 
-          icon={<AlertTriangle className={`h-5 w-5 ${(criticalNodes > 0 || highLoadNodes > 0) ? 'text-red-500' : 'text-gray-400'}`} />} 
-          title="Congestion Alerts" 
-          value={(criticalNodes + highLoadNodes).toString()} 
-          subtitle={
-            <div className="flex gap-2 text-[10px] font-bold mt-1.5">
-              <span className={criticalNodes > 0 ? "text-red-600" : "text-gray-400"}>{criticalNodes} Critical</span>|
-              <span className={highLoadNodes > 0 ? "text-orange-600" : "text-gray-400"}>{highLoadNodes} High</span>
-            </div>
-          } 
-          filterKey="anomalies"
-        />
-        <div className="h-full">
-           {/* Not filtering by endpoints for now */}
-          <MetricCard 
-            icon={<Wifi className="h-5 w-5 text-green-500" />} 
-            title="Active Endpoints" 
-            value={(totalEndpoints / 1000).toFixed(1) + "k"} 
-            subtitle={<span className="text-gray-500 font-bold text-[10px]">Connected municipal devices</span>} 
-          />
-        </div>
-        <div className="h-full">
-          <MetricCard 
-            icon={<Zap className="h-5 w-5 text-yellow-500" />} 
-            title="Avg Edge Latency" 
-            value="42ms" 
-            subtitle={<span className="text-green-600 font-bold text-[10px]">Within strict SLA</span>} 
-          />
-        </div>
+        <InteractiveMetricCard icon={<ArrowDownUp className="h-5 w-5 text-blue-500" />} title="Total Throughput" value={`${totalBandwidth.toFixed(2)} Gbps`} subtitle="Combined system payload" filterKey={null} />
+        <InteractiveMetricCard icon={<AlertTriangle className={`h-5 w-5 ${(criticalNodes > 0 || highLoadNodes > 0) ? 'text-red-500' : 'text-gray-400'}`} />} title="Congestion Alerts" value={(criticalNodes + highLoadNodes).toString()} subtitle={<div className="flex gap-2 text-[10px] font-bold mt-1.5"><span className={criticalNodes > 0 ? "text-red-600" : "text-gray-400"}>{criticalNodes} Critical</span>|<span className={highLoadNodes > 0 ? "text-orange-600" : "text-gray-400"}>{highLoadNodes} High</span></div>} filterKey="anomalies" />
+        <div className="h-full"><MetricCard icon={<Wifi className="h-5 w-5 text-green-500" />} title="Active Endpoints" value={(totalEndpoints / 1000).toFixed(1) + "k"} subtitle={<span className="text-gray-500 font-bold text-[10px]">Connected municipal devices</span>} /></div>
+        <div className="h-full"><MetricCard icon={<Zap className="h-5 w-5 text-yellow-500" />} title="Avg Edge Latency" value="42ms" subtitle={<span className="text-green-600 font-bold text-[10px]">Within strict SLA</span>} /></div>
       </div>
 
+      {/* NEW: PENDING PROVISIONING QUEUE */}
+      {pendingProvisioning.length > 0 && (
+        <Card className="bg-white border border-blue-200 shadow-sm mb-6 shrink-0 overflow-hidden animate-in slide-in-from-top-4">
+          <div className="p-4 border-b border-blue-100 bg-blue-50/80 flex justify-between items-center">
+            <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider flex items-center">
+              <ShieldCheck className="h-4 w-4 mr-2 text-blue-600" />
+              Pending Infrastructure Provisioning
+            </h3>
+            <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{pendingProvisioning.length} Items</span>
+          </div>
+          <div className="divide-y divide-gray-100">
+            {pendingProvisioning.map(sub => (
+              <div key={sub.id} className="p-4 flex items-center justify-between hover:bg-gray-50 transition-colors">
+                <div>
+                  <h4 className="font-bold text-gray-900 text-sm">{sub.name} <span className="ml-2 text-xs font-medium text-gray-500 bg-gray-100 px-2 py-0.5 rounded border border-gray-200">{sub.category}</span></h4>
+                  <p className="text-[10px] text-gray-500 mt-1 uppercase tracking-widest">Funded by PMO • Awaiting Network Security Clearance</p>
+                </div>
+                <div className="flex gap-2">
+                  <Button onClick={() => handleNetworkClearance(sub.id)} className="bg-green-600 hover:bg-green-700 text-white font-bold text-xs h-8 shadow-sm">
+                    <Lock className="h-3 w-3 mr-2" /> Whitelist & Secure
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
+
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 flex-1 min-h-0">
-        
         {/* MAIN BANDWIDTH TABLE */}
         <Card className="xl:col-span-2 bg-white border border-gray-200 shadow-sm flex flex-col h-full overflow-hidden">
           <div className="p-4 border-b border-gray-100 bg-gray-50/50 flex justify-between items-center shrink-0">
@@ -227,9 +233,7 @@ export const NetworksDashboard: React.FC<NetworksDashboardProps> = ({ systems })
                         {sys.deployment_type || 'External Cloud'}
                       </span>
                     </td>
-                    <td className="py-3 px-4">
-                      {getStatusBadge(sys.status)}
-                    </td>
+                    <td className="py-3 px-4">{getStatusBadge(sys.status)}</td>
                     <td className="py-3 px-4">
                       <div className="flex flex-col">
                         <span className={`text-[10px] font-black ${sys.bandwidth > 1500 ? 'text-red-600' : sys.bandwidth > 800 ? 'text-orange-600' : 'text-gray-700'}`}>
@@ -244,9 +248,7 @@ export const NetworksDashboard: React.FC<NetworksDashboardProps> = ({ systems })
                       </div>
                     </td>
                     <td className="py-3 px-6 text-right">
-                      <span className={`text-sm font-black ${sys.latency > 200 ? 'text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200' : 'text-gray-800'}`}>
-                        {sys.latency}ms
-                      </span>
+                      <span className={`text-sm font-black ${sys.latency > 200 ? 'text-red-600 bg-red-50 px-2 py-0.5 rounded border border-red-200' : 'text-gray-800'}`}>{sys.latency}ms</span>
                     </td>
                   </tr>
                 ))}
@@ -274,17 +276,10 @@ export const NetworksDashboard: React.FC<NetworksDashboardProps> = ({ systems })
               <div className="space-y-3">
                 {networkData.slice(0, 4).map((sys, idx) => (
                   <div key={`hog-${sys.id}`} className="bg-white border border-gray-200 p-3 rounded-xl shadow-sm hover:shadow-md transition-shadow relative overflow-hidden">
-                    {/* Subtle progress bar background based on rank */}
-                    <div 
-                      className="absolute left-0 top-0 bottom-0 bg-blue-50/50 z-0 border-r border-blue-100" 
-                      style={{ width: `${100 - (idx * 20)}%` }}
-                    ></div>
-                    
+                    <div className="absolute left-0 top-0 bottom-0 bg-blue-50/50 z-0 border-r border-blue-100" style={{ width: `${100 - (idx * 20)}%` }}></div>
                     <div className="relative z-10 flex justify-between items-start mb-1">
                       <p className="text-xs font-bold text-gray-900 truncate pr-2">{idx + 1}. {sys.name}</p>
-                      <p className="text-[10px] font-black text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded shadow-inner shrink-0">
-                        {(sys.bandwidth / 1000).toFixed(2)} Gbps
-                      </p>
+                      <p className="text-[10px] font-black text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded shadow-inner shrink-0">{(sys.bandwidth / 1000).toFixed(2)} Gbps</p>
                     </div>
                     <p className="relative z-10 text-[9px] text-gray-500 flex items-center font-bold uppercase tracking-widest mt-2">
                        <Wifi className="h-3 w-3 mr-1 text-gray-400" /> {sys.endpoints.toLocaleString()} Connected
@@ -292,7 +287,6 @@ export const NetworksDashboard: React.FC<NetworksDashboardProps> = ({ systems })
                   </div>
                 ))}
               </div>
-              
               <Button className="w-full mt-6 bg-blue-800 hover:bg-blue-900 text-yellow-400 text-xs font-bold shadow-sm h-10 transition-transform active:scale-95">
                 Throttle External Traffic
               </Button>

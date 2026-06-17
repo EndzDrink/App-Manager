@@ -1,10 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { MetricCard } from "@/components/MetricCard";
 import { WeeklyUsageChart } from "@/components/WeeklyUsageChart";
 import { CategoryUsageChart } from "@/components/CategoryUsageChart";
 import { 
   Server, CreditCard, Coins, Lightbulb, TrendingUp, ChevronRight ,
-  TrendingDown, ArrowLeftRight, DollarSign, ShieldCheck, XCircle, Search
+  TrendingDown, ArrowLeftRight, DollarSign, ShieldCheck, XCircle, Search, AlertTriangle
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -28,14 +28,15 @@ interface CIODashboardProps {
 export const CIODashboard: React.FC<CIODashboardProps> = ({
   systems, subscriptions, monthlyCost, percentUsed, costColor, trends, 
   recommendations, biSystemFilter, biUnitFilter, biDeptFilter, 
-  visibleWidgets = ['financial', 'portfolio', 'usage', 'category'], // Fallback if undefined
+  visibleWidgets = ['financial', 'portfolio', 'usage', 'category'],
   onSaveReport, onNavigateToRecommendations
 }) => {
   
   const [pipelineData, setPipelineData] = useState<any[]>([]);
+  const [escalations, setEscalations] = useState<any[]>([]);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
 
-  React.useEffect(() => {
+  useEffect(() => {
     const fetchPipeline = async () => {
       try {
         const token = localStorage.getItem('appManagerToken');
@@ -47,7 +48,26 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
         console.error("Failed to load pipeline data for CIO dashboard:", err);
       }
     };
+
+    const fetchEscalations = async () => {
+      try {
+        const token = localStorage.getItem('appManagerToken');
+        const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/audit/logs`, {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        if (res.ok) {
+          const logs = await res.json();
+          // Filter ONLY for items physically tagged as ESCALATION in the backend
+          const activeEscalations = logs.filter((log: any) => log.action.includes('ESCALATION:'));
+          setEscalations(activeEscalations);
+        }
+      } catch (err) {
+        console.error("Failed to fetch executive escalations:", err);
+      }
+    };
+
     fetchPipeline();
+    fetchEscalations();
   }, []);
 
   // ------------------------------------------------------------------
@@ -82,6 +102,7 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
       case 'ea_rejected': return eaRejected;
       case 'portfolio': return systems;
       case 'subscriptions': return subscriptions;
+      case 'escalations': return escalations;
       default: return [];
     }
   };
@@ -109,7 +130,6 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
     );
   };
 
-  // Determine grid layout for analytics charts based on visibility
   const showUsage = visibleWidgets?.includes('usage');
   const showCategory = visibleWidgets?.includes('category');
   const chartsGridCols = (showUsage && showCategory) ? 'lg:grid-cols-2' : 'lg:grid-cols-1';
@@ -117,6 +137,29 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
   return (
     <div className="animate-in fade-in duration-500 pb-12 max-w-[1600px] mx-auto relative">
       
+      {/* 0. EXECUTIVE BLOCKER ALERT (Conditional) */}
+      {escalations.length > 0 && (
+        <div className="mb-6 animate-in slide-in-from-top-4">
+          <Card className="bg-red-50 border border-red-200 shadow-sm p-4 flex items-center justify-between">
+            <div className="flex items-center">
+              <div className="bg-red-100 p-2 rounded-lg mr-4">
+                <AlertTriangle className="h-6 w-6 text-red-600 animate-pulse" />
+              </div>
+              <div>
+                <h3 className="text-sm font-black text-red-900 uppercase tracking-widest">Critical Blockers Detected</h3>
+                <p className="text-xs text-red-700 font-medium mt-0.5">The PMO has escalated {escalations.length} project(s) requiring executive unblocking.</p>
+              </div>
+            </div>
+            <Button 
+              onClick={() => handleFilterToggle('escalations')} 
+              className="bg-red-600 hover:bg-red-700 text-white font-bold text-xs h-9 shadow-sm"
+            >
+              Review Escalations
+            </Button>
+          </Card>
+        </div>
+      )}
+
       {/* 1. EXECUTIVE FINANCIAL SUMMARY */}
       {visibleWidgets?.includes('financial') && (
         <div className="animate-in fade-in duration-300">
@@ -240,18 +283,19 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
       {activeFilter && (
         <div className="mb-8 animate-in slide-in-from-top-4 duration-300">
           <Card className="bg-white border border-blue-200 shadow-lg flex flex-col overflow-hidden ring-1 ring-blue-100">
-            <div className="p-4 border-b border-blue-100 bg-blue-50/80 flex justify-between items-center">
-              <h3 className="text-sm font-bold text-blue-900 uppercase tracking-wider flex items-center">
-                <Search className="h-4 w-4 mr-2 text-blue-600" />
-                Drill-Down Report: <span className="ml-2 text-blue-700">{
+            <div className={`p-4 border-b flex justify-between items-center ${activeFilter === 'escalations' ? 'bg-red-50/80 border-red-200' : 'bg-blue-50/80 border-blue-100'}`}>
+              <h3 className={`text-sm font-bold uppercase tracking-wider flex items-center ${activeFilter === 'escalations' ? 'text-red-900' : 'text-blue-900'}`}>
+                {activeFilter === 'escalations' ? <AlertTriangle className="h-4 w-4 mr-2 text-red-600" /> : <Search className="h-4 w-4 mr-2 text-blue-600" />}
+                Drill-Down Report: <span className={`ml-2 ${activeFilter === 'escalations' ? 'text-red-700' : 'text-blue-700'}`}>{
                   activeFilter === 'deflected' ? 'Deflected CAPEX Requests' :
                   activeFilter === 'ea_approved' ? 'Architecturally Approved Spend' :
                   activeFilter === 'ea_rejected' ? 'Architecturally Vetoed Spend' :
                   activeFilter === 'portfolio' ? 'Enterprise IT Catalog' :
-                  activeFilter === 'subscriptions' ? 'Active Enterprise Licenses' : ''
+                  activeFilter === 'subscriptions' ? 'Active Enterprise Licenses' : 
+                  activeFilter === 'escalations' ? 'Executive Project Escalations' : ''
                 }</span>
               </h3>
-              <Button size="sm" variant="ghost" onClick={() => setActiveFilter(null)} className="h-8 w-8 p-0 text-blue-800 hover:bg-blue-200">
+              <Button size="sm" variant="ghost" onClick={() => setActiveFilter(null)} className="h-8 w-8 p-0 text-gray-500 hover:bg-gray-200 hover:text-gray-900">
                 <XCircle className="h-5 w-5" />
               </Button>
             </div>
@@ -285,11 +329,18 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
                         <th className="py-3 px-4 font-bold text-right">Monthly Cost</th>
                       </>
                     )}
+                    {activeFilter === 'escalations' && (
+                      <>
+                        <th className="py-3 px-6 font-bold">Timestamp</th>
+                        <th className="py-3 px-4 font-bold">Escalating Officer</th>
+                        <th className="py-3 px-6 font-bold">Escalation Detail</th>
+                      </>
+                    )}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-gray-50">
                   {filteredData.map((row: any, i: number) => (
-                    <tr key={row.id || i} className="hover:bg-blue-50/30 transition-colors">
+                    <tr key={row.id || i} className="hover:bg-gray-50 transition-colors">
                       {/* Dynamic Row Rendering */}
                       {(activeFilter === 'deflected' || activeFilter.startsWith('ea_')) && (
                         <>
@@ -325,6 +376,13 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
                           <td className="py-3 px-4 text-right font-black text-gray-800">
                             ZAR {parseFloat(row.price || row.monthly_cost || 0).toLocaleString()}
                           </td>
+                        </>
+                      )}
+                      {activeFilter === 'escalations' && (
+                        <>
+                          <td className="py-3 px-6 text-xs font-bold text-gray-500">{row.timestamp}</td>
+                          <td className="py-3 px-4 font-bold text-sm text-blue-600">{row.operator}</td>
+                          <td className="py-3 px-6 text-sm font-medium text-gray-800">{row.action}</td>
                         </>
                       )}
                     </tr>

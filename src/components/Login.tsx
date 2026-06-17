@@ -78,6 +78,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               type="email" 
               value={email}
               onChange={(e) => setEmail(e.target.value)}
+              autoComplete="username" 
               className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-900 focus:bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-all shadow-inner" 
               placeholder="name@organization.com"
               required 
@@ -90,6 +91,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
               type="password" 
               value={password}
               onChange={(e) => setPassword(e.target.value)}
+              autoComplete="current-password"
               className="w-full p-3 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-900 focus:bg-white focus:ring-2 focus:ring-sky-500 focus:border-sky-500 outline-none transition-all shadow-inner" 
               placeholder="••••••••"
               required 
