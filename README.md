@@ -1,91 +1,60 @@
-Smart Analyitics Manager: Strategic Governance Center
-1. System Overview
-The Smart Analytics Manager is an enterprise-grade platform designed to enforce an "Architecture First, Execution Second" philosophy within the municipality. It connects Enterprise Architecture (EA), the Project Management Office (PMO), Department Heads, and the CIO into a single, unified pipeline.
+SEAM: Strategic Enterprise Architecture & Management
+Municipal Operating System for Digital Governance
 
-The system eliminates Shadow IT, ensures Auditor General (AG) compliance, and optimizes software expenditure through live AI telemetry.
+1. System Overview
+SEAM (Strategic Enterprise Architecture & Management) is an enterprise-grade municipal operating system designed to enforce an "Architecture First, Execution Second" philosophy. The platform eliminates Shadow IT, ensures Auditor-General (AG) compliance, and optimizes software expenditure through live AI telemetry and automated deployment orchestration.
+
+Unlike traditional project management tools, SEAM serves as a unified digital assembly line connecting Enterprise Architecture (EA), the Project Management Office (PMO), Networks, Applications, and the CIO into a single, compliant pipeline.
 
 2. Role-Based Access Control (RBAC)
-The system strictly enforces data visibility and actions based on your assigned role:
+The system strictly enforces data visibility and duty segregation to ensure audit integrity:
 
-SuperAdmin / EA Deputy Director (ea@organization.com): The Gatekeeper. Has global oversight, vets all incoming software requests, issues SCM clearance, and manages the AG Compliance Matrix.
+SuperAdmin / EA Deputy Director: The Gatekeeper. Has global oversight, vets all incoming software requests, and manages the AG Compliance Matrix.
 
-CIO (cio@organization.com): The Executive. Views high-level telemetry, AI-driven portfolio insights, and handles escalated PMO funding bottlenecks.
+CIO: The Executive. Views executive telemetry, AI-driven portfolio insights, and handles critical funding escalations.
 
-PMO Lead (pmo@organization.com): The Executor. Manages the project funding register. Can only see projects after they have been approved by EA.
+PMO Lead: The Financier. Manages the project funding register. Only gains visibility into initiatives after successful EA architectural vetting.
 
-Department Head (head@organization.com): The Consumer. Restricted to viewing their own department's active spend, staff license allocations, and requesting new capabilities.
+Networks Head: The Infrastructure Shield. Executes network perimeter security, firewall whitelisting, and infrastructure provisioning.
 
-3. Core Modules & Workflows
-Module 1: The CIO Dashboard
-Primary User: CIO, Executives
-Purpose: High-level strategic oversight and AI-driven cost optimization.
+Applications Head: The Integrator. Manages system integration, Identity Federation (SSO/Entra ID), and final UAT sign-off.
 
-AI Executive Briefing: At the "Automated Portfolio Telemetry" banner provides a live, AI-generated summary of your current burn rate and optimization opportunities.
+Department Head: The Consumer. Manages departmental spend, staff license allocations, and requests new capabilities.
 
-Actionable Alerts: If EA flags redundant software, a red action button appears inside the Category Utilization. Clicking this takes you directly to the Optimization view.
+3. Core Modules & The Provisioning Pipeline
+Module 1: The CIO Dashboard (Executive Lens)
+Executive Financial Governance: Real-time visibility into total IT burn rates, mSCOA segment alignment, and Month-over-Month spend trends.
 
-Key Metrics: View real-time data on your total IT Portfolio (Internal, External, Hybrid), Active Licenses, Total Monthly Burn, and Mom (Month-over-Month) trends.
+Critical Blocker Alerts: A high-level audit view of project escalations. If funding bottlenecks arise, the CIO can review and "unblock" projects directly from the executive dashboard.
 
-Module 2: EA Strategy & The Tender Gatekeeper
-Primary User: Enterprise Architecture
-Purpose: Preventing Shadow IT and issuing procurement clearance.
+Module 2: The Assembly Line (Networks & Apps)
+Once the PMO funds a project, it enters the End-to-End Secure Deployment Pipeline:
 
-The Vetting Console: Review incoming software requests from departments. You must score their "Strategic Alignment" (0-100%).
+Networks Provisioning Queue: Infrastructure leads receive real-time notifications to secure the perimeter. They must explicitly execute [Whitelist & Secure] actions to protect the municipal grid.
 
-Approved: The system is automatically pushed to the PMO Project Pipeline for budget review.
+Applications Integration Queue: Once the network is secured, the Apps team manages the final integration. They utilize the [Federate SSO] and [Sign-off Go-Live] actions to finalize the deployment, triggering the billing cycle and notifying the Department Head of software readiness.
 
-Vetoed: The request is rejected, preventing non-compliant software from entering the municipality.
+Module 3: EA Strategy & Vetting
+Vetting Console: EA officers review incoming requests, scoring "Strategic Alignment" (0-100%).
 
-Tender Gatekeeper (ToR Scanner): Before a department can go to Supply Chain Management (SCM) for a tender, paste their Business Requirements/Terms of Reference into the scanner.
+Tender Gatekeeper: An AI-driven Terms of Reference (ToR) scanner. It flags capability overlaps with existing municipal systems to prevent redundant procurement before it reaches SCM.
 
-If the AI detects an overlap with an existing municipal system, procurement is blocked.
-
-If cleared, the system generates a cryptographically secure EA-AUTH Clearance Token. Copy this token to attach to the official SCM tender documents as proof of architectural compliance.
-
-Module 3: PMO Project Register
-Primary User: PMO Lead
-Purpose: Tracking approved initiatives from demand to execution.
-
-Pipeline Status: View all projects that have passed EA vetting. Track their Gate Status (Initiative, Awaiting Funding, Funded) and estimated CapEx.
-
-Targeted Escalation: If a project is stuck waiting for departmental funding, locate it in the "Funding Bottlenecks" sidebar. Click Escalate to immediately send a targeted alert to the CIO’s executive audit log for unblocking.
-
-Module 4: Audit & AG Compliance Matrix
-Primary User: Enterprise Architecture
-Purpose: Resolving capability duplication and managing Auditor General risks.
-
-Strategic Portfolio Alignment: This matrix tracks systems against their EA Strategic Pillars.
-
-Orphan System Handover: Systems marked as "Orphan" (High AG Risk) have no assigned budget owner. Click View Actions -> Initiate Handover to formally assign the system to a Department Head, downgrading the AG risk and shifting it into active remediation.
-
-Duplication Resolution: If multiple systems perform the same function, open the Resolution Matrix to formally designate a "Primary System" and notify the PMO to initiate license consolidation.
+Module 4: Audit & AG Compliance Ledger
+MFMA Secure Ledger: Every action within the application—from a procurement request to a network firewall modification—is cryptographically logged. This ledger provides the Auditor-General with an unalterable chain of custody for all municipal IT expenditure.
 
 Module 5: Executive Optimization (AI Reclamations)
-Primary User: CIO, Enterprise Architecture
-Purpose: Reclaiming wasted budget from idle software licenses.
+Automated Portfolio Telemetry: The AI monitors usage patterns to identify "Zombie Licenses."
 
-Review Optimization Flags: The AI constantly monitors license usage. If a user has not actively used a costly license, it will appear here.
-
-Interrogate AI: Click this to view the mathematical justification (Confidence Score, Idle Days, and ROI calculation) explaining exactly why the AI flagged this license for removal.
-
-Review Logs (Investigation Mode): Click this to instantly jump to the Identity Matrix. The system will automatically filter the entire municipal active directory to show you the exact users hoarding the specific software.
-
-Reclaim License: Initiate a "Double-Tap Revocation" to cancel the license, immediately halting access and adjusting the departmental financial ledger.
+Double-Tap Revocation: Administrators can initiate license reclamation, immediately halting access and reclaiming OPEX budget back into the central municipal pool.
 
 Module 6: Identity & Access Matrix
-Primary User: Department Heads, EA
-Purpose: Mapping personnel to their software entitlements.
+High-Assurance Identity: Maps personnel to their exact software entitlements.
 
-Global Search: Search by staff email, department unit, or specific software name.
-
-Inspect Entitlements: Click Inspect on any user to expand their profile. You will see every active capability assigned to them and the exact ZAR monthly cost they incur.
-
-Investigation Mode: If you arrive here via the Optimization tab, the matrix will highlight the target software in red, making it easy to identify exactly where budget is bleeding.
+Investigation Mode: Allows Department Heads to drill down into specific user profiles to see exactly which capabilities are driving their departmental costs.
 
 Module 7: Financial License Ledger (Subscriptions)
-Primary User: Department Heads
-Purpose: Procuring new capabilities for staff.
+Budget Guardrails: Enables Department Heads to procure software within allocated budget limits.
 
-Procure Department License (Buy): Assign an approved IT Catalog system to a specific user identity. The system will automatically enforce Role-Based Access Control, ensuring you can only buy and assign licenses within your own allocated departmental budget.
+Dynamic Revocation: Real-time updates to departmental burn rates upon license cancellation, ensuring continuous compliance with MSCOA reporting standards.
 
-Revoke: Cancel a subscription. Once revoked, the cost is immediately removed from your monthly departmental burn rate metrics.
+Developed by Ilami Technologies. Protected by Municipal Gov-Tech Framework.
