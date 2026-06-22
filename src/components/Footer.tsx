@@ -66,8 +66,8 @@ export default function Footer() {
               <p className="text-xs text-gray-600 font-medium">For system outages, integration requests, or billing inquiries, please contact the vendor directly.</p>
               <div className="bg-gray-50 p-3 rounded-lg border border-gray-100 text-sm">
                 <p className="font-bold text-gray-900">ILAMI Technologies</p>
-                <p className="text-[#00a9e0] font-bold mt-1">support@ilami-technologies.com</p>
-                <p className="text-gray-500 mt-1 font-medium">+27 (0) 800 123 456</p>
+                <p className="text-[#00a9e0] font-bold mt-1">support@ilamitechnologies.com</p>
+                <p className="text-gray-500 mt-1 font-medium">+27 (0) 732 554 298</p>
               </div>
               <Button className="w-full bg-[#00a9e0] hover:bg-[#008bc6] text-white font-bold" onClick={() => setActiveView('none')}>Close</Button>
             </div>

@@ -214,6 +214,24 @@ app.get('/api/users', authenticateToken, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// --- NEW: ONBOARDING ENDPOINT ---
+app.post('/api/users', authenticateToken, async (req, res, next) => {
+  // Only SuperAdmin or EA can onboard new staff
+  if (!['SuperAdmin', 'EA'].includes(req.user.role)) {
+    return res.status(403).json({ error: "Access Denied: Onboarding restricted." });
+  }
+
+  const { email, password, role, department_id } = req.body;
+  try {
+    const hashedPassword = await bcrypt.hash(password, 10);
+    await pool.query(
+      `INSERT INTO admin_users (email, password_hash, role, department_id) VALUES ($1, $2, $3, $4)`,
+      [email, hashedPassword, role, parseInt(department_id)]
+    );
+    res.json({ success: true, message: "User successfully onboarded." });
+  } catch (err) { next(err); }
+});
+
 app.get('/api/subscriptions', authenticateToken, async (req, res, next) => {
   try {
     let query = `

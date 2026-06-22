@@ -10,9 +10,9 @@ interface LoginProps {
 }
 
 export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
-  // TIP: Clear these defaults once you move to production
-  const [email, setEmail] = useState('admin@organization.com');
-  const [password, setPassword] = useState('Admin2026!');
+  // State is now initialized as empty strings so the inputs are completely blank on load
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
@@ -54,9 +54,9 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
         {/* BRANDING HEADER */}
         <div className="flex flex-col items-center mb-8">
           <div className="w-16 h-16 bg-yellow-400 rounded-2xl flex items-center justify-center mb-5 shadow-lg shadow-yellow-400/20 transform hover:scale-105 transition-transform">
-            <Monitor className="h-8 w-8 text-blue-400" />
+            <Monitor className="h-8 w-8 text-blue-800" />
           </div>
-          <h1 className="text-3xl font-black text-blue-500 tracking-tight">SEAM</h1>
+          <h1 className="text-3xl font-black text-blue-900 tracking-tight">SEAM</h1>
           <div className="flex items-center mt-1.5">
             <ShieldCheck className="h-3.5 w-3.5 text-sky-500 mr-1.5" />
             <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">Enterprise Architecture</p>
@@ -100,7 +100,7 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           
           <Button 
             type="submit" 
-            className="w-full bg-blue-500 hover:bg-blue-900 text-yellow-400 h-12 rounded-lg font-black shadow-lg transition-all border border-blue-800 hover:border-blue-700 mt-2" 
+            className="w-full bg-blue-900 hover:bg-black text-yellow-400 h-12 rounded-lg font-black shadow-lg transition-all border border-blue-800 hover:border-blue-700 mt-2" 
             disabled={isLoading}
           >
             {isLoading ? (
@@ -111,8 +111,11 @@ export const Login: React.FC<LoginProps> = ({ onLoginSuccess }) => {
           </Button>
         </form>
 
-        {/* FOOTER */}
-        <div className="mt-8 pt-6 border-t border-gray-100 text-center">
+        {/* REGISTRATION LINK & FOOTER */}
+        <div className="mt-8 pt-6 border-t border-gray-100 flex flex-col items-center space-y-4">
+          <a href="/register" className="text-xs font-bold text-sky-600 hover:text-blue-800 transition-colors underline decoration-sky-200 underline-offset-4">
+            New Personnel? Complete Biometric Registration
+          </a>
           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">
             Protected by Municipal Gov-Tech Framework
           </p>
