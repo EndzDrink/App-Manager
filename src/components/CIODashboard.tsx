@@ -4,7 +4,7 @@ import { WeeklyUsageChart } from "@/components/WeeklyUsageChart";
 import { CategoryUsageChart } from "@/components/CategoryUsageChart";
 import { 
   Server, CreditCard, Coins, Lightbulb, TrendingUp, ChevronRight ,
-  TrendingDown, ArrowLeftRight, DollarSign, ShieldCheck, XCircle, Search, AlertTriangle
+  TrendingDown, ArrowLeftRight, DollarSign, ShieldCheck, XCircle, Search, AlertTriangle, CheckCircle2, Clock
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,12 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
   const [escalations, setEscalations] = useState<any[]>([]);
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
 
+  // --- NEW STATES FOR RESOLUTION MODAL ---
+  const [selectedEscalation, setSelectedEscalation] = useState<any | null>(null);
+  const [directive, setDirective] = useState<string>('Approved');
+  const [resolutionNotes, setResolutionNotes] = useState<string>('');
+  const [isResolving, setIsResolving] = useState<boolean>(false);
+
   useEffect(() => {
     const fetchPipeline = async () => {
       try {
@@ -57,7 +63,7 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
         });
         if (res.ok) {
           const logs = await res.json();
-          // FIXED: Added an armor check to ensure log.action is not null before checking .includes()
+          // Filter ONLY for items physically tagged as ESCALATION in the backend
           const activeEscalations = logs.filter((log: any) => log.action && log.action.includes('ESCALATION:'));
           setEscalations(activeEscalations);
         }
@@ -70,6 +76,39 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
     fetchEscalations();
   }, []);
 
+  // --- NEW: HANDLE RESOLUTION SUBMISSION ---
+  const handleResolveEscalation = async () => {
+    if (!selectedEscalation || !resolutionNotes) return alert("Resolution justification notes are mandatory for the AG audit ledger.");
+    setIsResolving(true);
+
+    try {
+      const token = localStorage.getItem('appManagerToken');
+      const res = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/api/pmo/resolve/${selectedEscalation.id}`, {
+        method: 'PUT',
+        headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}` 
+        },
+        body: JSON.stringify({ directive, notes: resolutionNotes })
+      });
+
+      if (res.ok) {
+        // Remove the resolved item from the local state to instantly update UI
+        setEscalations(prev => prev.filter(e => e.id !== selectedEscalation.id));
+        setSelectedEscalation(null);
+        setResolutionNotes('');
+        setDirective('Approved');
+      } else {
+        alert("Failed to execute directive. Ensure backend route is active.");
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setIsResolving(false);
+    }
+  };
+
+
   // ------------------------------------------------------------------
   // DATA COMPUTATIONS
   // ------------------------------------------------------------------
@@ -78,7 +117,7 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
   const hybridCount = systems.filter(s => s.deployment_type?.includes('Hybrid')).length;
 
   const deflectedRequests = useMemo(() => pipelineData.filter(d => d.crm_status === 'deflected'), [pipelineData]);
-  const opexSaved = useMemo(() => deflectedRequests.reduce((sum, d) => sum + (parseFloat(String(d.estimated_cost_annual)) || 0), 0),[deflectedRequests]);
+  const opexSaved = useMemo(() => deflectedRequests.reduce((sum, d) => sum + (parseFloat(String(d.estimated_cost_annual)) || 0), 0), [deflectedRequests]);
   
   const eaApproved = useMemo(() => pipelineData.filter(d => d.ea_status === 'Approved'), [pipelineData]);
   const eaRejected = useMemo(() => pipelineData.filter(d => d.ea_status === 'Rejected' || d.ea_status === 'Vetoed'), [pipelineData]);
@@ -333,7 +372,8 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
                       <>
                         <th className="py-3 px-6 font-bold">Timestamp</th>
                         <th className="py-3 px-4 font-bold">Escalating Officer</th>
-                        <th className="py-3 px-6 font-bold">Escalation Detail</th>
+                        <th className="py-3 px-6 font-bold w-1/2">Escalation Detail</th>
+                        <th className="py-3 px-4 font-bold text-right">Action</th>
                       </>
                     )}
                   </tr>
@@ -383,6 +423,16 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
                           <td className="py-3 px-6 text-xs font-bold text-gray-500">{row.timestamp}</td>
                           <td className="py-3 px-4 font-bold text-sm text-blue-600">{row.operator}</td>
                           <td className="py-3 px-6 text-sm font-medium text-gray-800">{row.action}</td>
+                          <td className="py-3 px-4 text-right">
+                             <Button 
+                               size="sm" 
+                               variant="outline" 
+                               className="border-red-200 text-red-700 hover:bg-red-50 text-xs font-bold h-7"
+                               onClick={() => setSelectedEscalation(row)}
+                             >
+                                Resolve
+                             </Button>
+                          </td>
                         </>
                       )}
                     </tr>
@@ -398,6 +448,77 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
               </table>
             </div>
           </Card>
+        </div>
+      )}
+
+      {/* --- NEW: RESOLUTION MODAL OVERLAY --- */}
+      {selectedEscalation && (
+        <div className="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200">
+            <Card className="w-full max-w-lg bg-white shadow-2xl rounded-xl border-0 overflow-hidden animate-in zoom-in-95 duration-200">
+                
+                <div className="bg-gradient-to-r from-blue-900 to-blue-800 p-5 flex justify-between items-center text-white">
+                    <div className="flex items-center">
+                        <ShieldCheck className="h-5 w-5 mr-2 text-blue-300" />
+                        <h3 className="font-black tracking-wide">Executive Override Panel</h3>
+                    </div>
+                    <Button variant="ghost" size="sm" onClick={() => setSelectedEscalation(null)} className="h-8 w-8 p-0 text-blue-200 hover:bg-blue-800 hover:text-white">
+                        <XCircle className="h-5 w-5" />
+                    </Button>
+                </div>
+
+                <div className="p-6">
+                    <div className="bg-gray-50 border border-gray-200 p-3 rounded-lg mb-6">
+                        <p className="text-[10px] font-black text-gray-500 uppercase tracking-widest mb-1">Target Issue</p>
+                        <p className="text-sm font-medium text-gray-800">{selectedEscalation.action}</p>
+                    </div>
+
+                    <div className="space-y-4 mb-6">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">1. Select Executive Directive</label>
+                        <div className="grid grid-cols-3 gap-3">
+                            <div 
+                                onClick={() => setDirective('Approved')}
+                                className={`border rounded-lg p-3 text-center cursor-pointer transition-all ${directive === 'Approved' ? 'bg-green-50 border-green-500 ring-2 ring-green-200' : 'hover:bg-gray-50 border-gray-200'}`}
+                            >
+                                <CheckCircle2 className={`h-5 w-5 mx-auto mb-1 ${directive === 'Approved' ? 'text-green-600' : 'text-gray-400'}`} />
+                                <span className={`text-xs font-bold ${directive === 'Approved' ? 'text-green-800' : 'text-gray-600'}`}>Approve Fund</span>
+                            </div>
+                            <div 
+                                onClick={() => setDirective('Deferred')}
+                                className={`border rounded-lg p-3 text-center cursor-pointer transition-all ${directive === 'Deferred' ? 'bg-amber-50 border-amber-500 ring-2 ring-amber-200' : 'hover:bg-gray-50 border-gray-200'}`}
+                            >
+                                <Clock className={`h-5 w-5 mx-auto mb-1 ${directive === 'Deferred' ? 'text-amber-600' : 'text-gray-400'}`} />
+                                <span className={`text-xs font-bold ${directive === 'Deferred' ? 'text-amber-800' : 'text-gray-600'}`}>Defer to Q3</span>
+                            </div>
+                            <div 
+                                onClick={() => setDirective('Vetoed')}
+                                className={`border rounded-lg p-3 text-center cursor-pointer transition-all ${directive === 'Vetoed' ? 'bg-red-50 border-red-500 ring-2 ring-red-200' : 'hover:bg-gray-50 border-gray-200'}`}
+                            >
+                                <XCircle className={`h-5 w-5 mx-auto mb-1 ${directive === 'Vetoed' ? 'text-red-600' : 'text-gray-400'}`} />
+                                <span className={`text-xs font-bold ${directive === 'Vetoed' ? 'text-red-800' : 'text-gray-600'}`}>Final Veto</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-2 mb-6">
+                        <label className="text-[10px] font-black text-gray-500 uppercase tracking-widest">2. Justification (AG Audit Requirement)</label>
+                        <textarea 
+                            className="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-blue-500 outline-none h-24 resize-none"
+                            placeholder="State the financial or operational reason for this override..."
+                            value={resolutionNotes}
+                            onChange={(e) => setResolutionNotes(e.target.value)}
+                        />
+                    </div>
+
+                    <Button 
+                        onClick={handleResolveEscalation} 
+                        disabled={!resolutionNotes || isResolving}
+                        className="w-full bg-blue-900 hover:bg-black text-white font-black h-12 transition-all disabled:opacity-50"
+                    >
+                        {isResolving ? 'Executing Directive...' : 'Finalize & Notify PMO'}
+                    </Button>
+                </div>
+
+            </Card>
         </div>
       )}
       

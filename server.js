@@ -605,6 +605,46 @@ app.post('/api/pmo/escalate', authenticateToken, async (req, res, next) => {
     res.json({ success: true, triggerTelemetryUpdate: true, message: "Escalated to CIO successfully." });
   } catch (err) { next(err); }
 });
+// --- NEW: CIO EXECUTIVE RESOLUTION ROUTE ---
+app.put('/api/pmo/resolve/:log_id', authenticateToken, async (req, res, next) => {
+  const { log_id } = req.params;
+  const { directive, notes } = req.body; // e.g., 'Approved', 'Vetoed'
+  const operatorId = req.user.id;
+
+  if (req.user.role !== 'SuperAdmin' && req.user.role !== 'CIO') {
+    return res.status(403).json({ error: "Access Denied: Executive Override Restricted." });
+  }
+
+  try {
+    await pool.query('BEGIN');
+
+    // 1. Mark the original escalation as resolved in the ledger
+    await pool.query(
+      `UPDATE usage_logs 
+       SET action = REPLACE(action, 'ESCALATION:', 'RESOLVED [${directive}]:') 
+       WHERE id = $1`, 
+      [log_id]
+    );
+
+    // 2. Log the CIO's explicit justification for the Auditor-General
+    await pool.query(
+      `INSERT INTO usage_logs (user_id, action, duration_minutes) VALUES ($1, $2, 0)`,
+      [operatorId, `EXECUTIVE DIRECTIVE: Escalation ID ${log_id} resolved with status [${directive}]. Justification: ${notes}`]
+    );
+
+    // 3. Fire the notification back down to the PMO
+    await pool.query(
+      `INSERT INTO notifications (target_role, title, message, alert_type) VALUES ($1, $2, $3, $4)`,
+      ['PMOLead', 'Executive Directive Issued', `The CIO has issued a [${directive}] directive on your escalated project. Notes: ${notes}`, directive === 'Approved' ? 'success' : 'warning']
+    );
+
+    await pool.query('COMMIT');
+    res.json({ success: true, message: "Executive directive executed and PMO notified." });
+  } catch (err) {
+    await pool.query('ROLLBACK');
+    next(err);
+  }
+});
 
 app.post('/api/requests', authenticateToken, async (req, res, next) => {
   const { system_id, category, required_capabilities, estimated_users, estimated_cost_annual, justification, exception_justification, aligned_domains } = req.body;
