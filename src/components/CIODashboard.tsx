@@ -57,8 +57,8 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
         });
         if (res.ok) {
           const logs = await res.json();
-          // Filter ONLY for items physically tagged as ESCALATION in the backend
-          const activeEscalations = logs.filter((log: any) => log.action.includes('ESCALATION:'));
+          // FIXED: Added an armor check to ensure log.action is not null before checking .includes()
+          const activeEscalations = logs.filter((log: any) => log.action && log.action.includes('ESCALATION:'));
           setEscalations(activeEscalations);
         }
       } catch (err) {
@@ -78,7 +78,7 @@ export const CIODashboard: React.FC<CIODashboardProps> = ({
   const hybridCount = systems.filter(s => s.deployment_type?.includes('Hybrid')).length;
 
   const deflectedRequests = useMemo(() => pipelineData.filter(d => d.crm_status === 'deflected'), [pipelineData]);
-  const opexSaved = useMemo(() => deflectedRequests.reduce((sum, d) => sum + (parseFloat(String(d.estimated_cost_annual)) || 0), 0), [deflectedRequests]);
+  const opexSaved = useMemo(() => deflectedRequests.reduce((sum, d) => sum + (parseFloat(String(d.estimated_cost_annual)) || 0), 0),[deflectedRequests]);
   
   const eaApproved = useMemo(() => pipelineData.filter(d => d.ea_status === 'Approved'), [pipelineData]);
   const eaRejected = useMemo(() => pipelineData.filter(d => d.ea_status === 'Rejected' || d.ea_status === 'Vetoed'), [pipelineData]);

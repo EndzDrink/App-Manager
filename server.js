@@ -179,6 +179,7 @@ app.post('/api/systems', authenticateToken, async (req, res, next) => {
   }
 });
 
+// --- UPDATED: GET /api/users now includes the missing s.id ---
 app.get('/api/users', authenticateToken, async (req, res, next) => {
   try {
     let query = `
@@ -190,6 +191,7 @@ app.get('/api/users', authenticateToken, async (req, res, next) => {
         COALESCE(
           json_agg(
             json_build_object(
+              'id', s.id,
               'name', COALESCE(es.name, 'Unlinked System (ID: ' || COALESCE(s.system_id::text, 'Unknown') || ')'), 
               'price', COALESCE(s.monthly_cost, 0)
             )
@@ -378,7 +380,7 @@ app.put('/api/subscriptions/:id/transfer', authenticateToken, async (req, res, n
 
 app.put('/api/subscriptions/:id/assign', authenticateToken, async (req, res, next) => {
   const { id } = req.params;
-  const { department_id, assigned_user_id, associated_project } = req.body;
+  const { department_id, assigned_user_id, associated_project, system_id } = req.body;
   const operatorId = req.user.id || null;
 
   try {
@@ -393,9 +395,16 @@ app.put('/api/subscriptions/:id/assign', authenticateToken, async (req, res, nex
       `UPDATE active_subscriptions 
        SET owning_department_id = COALESCE($1, owning_department_id),
            assigned_user_id = COALESCE($2, assigned_user_id),
-           associated_project = COALESCE($3, associated_project)
-       WHERE id = $4 RETURNING *`,
-      [department_id ? parseInt(department_id) : null, assigned_user_id ? parseInt(assigned_user_id) : null, associated_project || null, id]
+           associated_project = COALESCE($3, associated_project),
+           system_id = COALESCE($4, system_id)
+       WHERE id = $5 RETURNING *`,
+      [
+        department_id ? parseInt(department_id) : null, 
+        assigned_user_id ? parseInt(assigned_user_id) : null, 
+        associated_project || null, 
+        system_id ? parseInt(system_id) : null, // Added system_id patching
+        id
+      ]
     );
 
     await pool.query(

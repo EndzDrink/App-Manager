@@ -50,8 +50,8 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigat
     
     try {
       const token = localStorage.getItem('appManagerToken');
-      // If the broken link comes from a subscription table join failure, we patch the subscription system_id
-      const res = await fetch(`${API_URL}/api/subscriptions/${subId}`, {
+      // FIXED: Added /assign to the fetch URL so it hits the correct backend endpoint
+      const res = await fetch(`${API_URL}/api/subscriptions/${subId}/assign`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json', 
@@ -287,21 +287,25 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigat
                                       <tbody className="divide-y divide-gray-50">
                                         {assignedSystems.map((sys: any, idx: number) => {
                                           const isTarget = investigationQuery && (sys.name || '').toLowerCase().includes(investigationQuery.toLowerCase());
-                                          const isUnlinked = !sys.name || sys.name === 'Unknown' || sys.name === 'Unlinked System';
+                                          // Enhanced unlinked check to match the screenshot string
+                                          const isUnlinked = !sys.name || sys.name === 'Unknown' || sys.name.includes('Unlinked System');
                                           
                                           return (
                                             <tr key={idx} className={isTarget ? 'bg-red-50/30' : (isUnlinked ? 'bg-orange-50/30' : 'bg-white hover:bg-gray-50/50 transition-colors')}>
                                               <td className="py-3 px-6">
                                                 {isUnlinked ? (
-                                                  <div className="flex items-center max-w-sm">
-                                                    <AlertTriangle className="h-4 w-4 text-orange-500 mr-2 shrink-0" />
+                                                  <div className="flex flex-col gap-2 max-w-sm">
+                                                    <div className="flex items-center text-orange-800 font-bold text-xs">
+                                                        <AlertTriangle className="h-4 w-4 text-orange-500 mr-2 shrink-0" />
+                                                        Unlinked Record (Sub ID: {sys.id})
+                                                    </div>
                                                     <select 
                                                         className="w-full text-[10px] border border-orange-300 rounded p-1.5 font-bold bg-white text-orange-900 outline-none focus:ring-2 focus:ring-orange-500 cursor-pointer shadow-sm"
                                                         onChange={(e) => handleReconcileSystem(user.id, sys.id, e.target.value)}
                                                         value=""
                                                         disabled={isReconciling === sys.id}
                                                     >
-                                                        <option value="" disabled>{isReconciling === sys.id ? 'Reconciling Link...' : 'Fix Broken Link (Assign Catalog System)'}</option>
+                                                        <option value="" disabled>{isReconciling === sys.id ? 'Reconciling Link...' : 'Link to Enterprise Catalog System'}</option>
                                                         {availableSystems.map(system => (
                                                             <option key={system.id} value={system.id}>{system.name} ({system.category})</option>
                                                         ))}
