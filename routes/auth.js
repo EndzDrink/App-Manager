@@ -51,7 +51,7 @@ router.post('/register', async (req, res, next) => {
     if (sa_id) {
         await pool.query(
           `INSERT INTO usage_logs (user_id, action, duration_minutes) VALUES ((SELECT id FROM admin_users WHERE email = $1), $2, 0)`,
-          [email, `ONBOARDING: Biometric & service_number (${sa_id}) received for zero-trust verification.`]
+          [email, `ONBOARDING: Biometric & service_number (${service_number}) received for zero-trust verification.`]
         );
     }
 

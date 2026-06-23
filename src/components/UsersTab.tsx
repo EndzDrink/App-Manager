@@ -4,20 +4,33 @@ import { Button } from "@/components/ui/button";
 import { 
   Users as UsersIcon, Search, Shield, Building2, Calendar, 
   Database, AlertCircle, ChevronDown, RefreshCw, Server, 
-  CheckCircle2, LayoutDashboard, AlertTriangle
+  CheckCircle2, LayoutDashboard, AlertTriangle, ChevronLeft, ChevronRight
 } from "lucide-react";
 
 interface UsersTabProps {
   users: any[];
   onRefresh: () => Promise<void> | void;
   investigationQuery?: string; 
+  // NEW: Pagination Props
+  currentPage?: number;
+  totalPages?: number;
+  totalUsers?: number;
+  onPageChange?: (page: number) => void;
 }
 
-export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigationQuery = '' }) => {
+export const UsersTab: React.FC<UsersTabProps> = ({ 
+  users, 
+  onRefresh, 
+  investigationQuery = '',
+  currentPage = 1,
+  totalPages = 1,
+  totalUsers = 0,
+  onPageChange
+}) => {
   const [searchQuery, setSearchQuery] = useState(investigationQuery);
   const [expandedUser, setExpandedUser] = useState<number | null>(null);
   
-  // NEW: States for Reconciliation
+  // States for Reconciliation
   const [availableSystems, setAvailableSystems] = useState<any[]>([]);
   const [isReconciling, setIsReconciling] = useState<number | null>(null);
 
@@ -27,7 +40,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigat
     setSearchQuery(investigationQuery);
   }, [investigationQuery]);
 
-  // NEW: Fetch Enterprise Catalog to populate the dropdown for broken links
+  // Fetch Enterprise Catalog to populate the dropdown for broken links
   useEffect(() => {
     const fetchSystems = async () => {
       try {
@@ -43,14 +56,13 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigat
     fetchSystems();
   }, []);
 
-  // NEW: Handle Broken Link Reconciliation
+  // Handle Broken Link Reconciliation
   const handleReconcileSystem = async (userId: number, subId: number, targetSystemId: string) => {
     if (!targetSystemId) return;
     setIsReconciling(subId || userId);
     
     try {
       const token = localStorage.getItem('appManagerToken');
-      // FIXED: Added /assign to the fetch URL so it hits the correct backend endpoint
       const res = await fetch(`${API_URL}/api/subscriptions/${subId}/assign`, {
         method: 'PUT',
         headers: { 
@@ -287,7 +299,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigat
                                       <tbody className="divide-y divide-gray-50">
                                         {assignedSystems.map((sys: any, idx: number) => {
                                           const isTarget = investigationQuery && (sys.name || '').toLowerCase().includes(investigationQuery.toLowerCase());
-                                          // Enhanced unlinked check to match the screenshot string
                                           const isUnlinked = !sys.name || sys.name === 'Unknown' || sys.name.includes('Unlinked System');
                                           
                                           return (
@@ -358,6 +369,42 @@ export const UsersTab: React.FC<UsersTabProps> = ({ users, onRefresh, investigat
                 })}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {/* NEW: PAGINATION FOOTER */}
+        {(totalPages > 1 || totalUsers > 0) && (
+          <div className="p-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between shrink-0">
+            <p className="text-xs text-gray-500 font-medium">
+              Showing <span className="font-bold text-gray-900">{users.length}</span> records
+              {totalUsers > 0 && ` of ${totalUsers.toLocaleString()} total identities`}
+            </p>
+
+            {totalPages > 1 && (
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onPageChange && onPageChange(currentPage - 1)}
+                  disabled={currentPage === 1}
+                  className="h-8 text-xs font-bold text-blue-700 hover:bg-blue-50"
+                >
+                  <ChevronLeft className="h-4 w-4 mr-1" /> Prev
+                </Button>
+                <span className="text-[10px] font-black uppercase tracking-widest text-gray-400 px-2">
+                  Page <span className="text-blue-900 text-xs">{currentPage}</span> / {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => onPageChange && onPageChange(currentPage + 1)}
+                  disabled={currentPage === totalPages}
+                  className="h-8 text-xs font-bold text-blue-700 hover:bg-blue-50"
+                >
+                  Next <ChevronRight className="h-4 w-4 ml-1" />
+                </Button>
+              </div>
+            )}
           </div>
         )}
       </Card>

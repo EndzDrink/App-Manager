@@ -179,9 +179,30 @@ app.post('/api/systems', authenticateToken, async (req, res, next) => {
   }
 });
 
-// --- UPDATED: GET /api/users now includes the missing s.id ---
+// --- UPDATED: GET /api/users now supports LIMIT and OFFSET Pagination ---
 app.get('/api/users', authenticateToken, async (req, res, next) => {
   try {
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50; 
+    const offset = (page - 1) * limit;
+
+    // Base conditions
+    let condition = '1=1';
+    let params = [];
+    let paramIndex = 1;
+
+    if (req.user.role === 'DepartmentHead' && req.user.deptId) {
+      condition += ` AND p.department_id = $${paramIndex}`;
+      params.push(req.user.deptId);
+      paramIndex++;
+    }
+
+    // Step 1: Get the absolute total count of users matching the condition
+    const countQuery = `SELECT COUNT(*) as total FROM personnel p WHERE ${condition}`;
+    const countResult = await pool.query(countQuery, params);
+    const totalUsers = parseInt(countResult.rows[0].total || 0);
+
+    // Step 2: Fetch the paginated data
     let query = `
       SELECT 
         p.id, 
@@ -202,17 +223,27 @@ app.get('/api/users', authenticateToken, async (req, res, next) => {
       LEFT JOIN departments d ON p.department_id = d.id 
       LEFT JOIN active_subscriptions s ON p.id = s.assigned_user_id
       LEFT JOIN enterprise_systems es ON s.system_id = es.id
+      WHERE ${condition}
+      GROUP BY p.id, d.name 
+      ORDER BY p.id ASC
+      LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
     
-    let params = [];
-    if (req.user.role === 'DepartmentHead' && req.user.deptId) {
-      query += ' WHERE p.department_id = $1';
-      params.push(req.user.deptId);
-    }
-    query += ' GROUP BY p.id, d.name ORDER BY p.id ASC';
+    // Add pagination params to the end
+    const dataParams = [...params, limit, offset];
+    const r = await pool.query(query, dataParams);
+    
+    // Step 3: Return data wrapped in pagination metadata
+    res.json({
+      data: r.rows,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(totalUsers / limit),
+        totalItems: totalUsers,
+        limit: limit
+      }
+    });
 
-    const r = await pool.query(query, params);
-    res.json(r.rows);
   } catch (err) { next(err); }
 });
 
