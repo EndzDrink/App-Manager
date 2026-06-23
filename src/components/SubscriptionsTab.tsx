@@ -49,7 +49,11 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
       fetch(`${API_URL}/api/users`, { headers })
     ]).then(async ([sysRes, userRes]) => {
       if (sysRes.ok) setAvailableSystems(await sysRes.json());
-      if (userRes.ok) setAvailableUsers(await userRes.json());
+      if (userRes.ok) {
+        const json = await userRes.json();
+        // FIXED: Safely extract the array whether it's the new paginated format or the old array format
+        setAvailableUsers(json.data ? json.data : json);
+      }
     });
   }, []);
 
