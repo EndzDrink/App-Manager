@@ -31,7 +31,7 @@ router.post('/setup', async (req, res, next) => {
 // 2. PUBLIC REGISTRATION ROUTE: Handles the Zero-Trust Biometric Payload
 router.post('/register', async (req, res, next) => {
   // The frontend biometric form doesn't send a password, so we extract the new fields
-  const { email, password, role, department_id, sa_id } = req.body;
+  const { email, password, role, department_id, service_number } = req.body;
   
   try {
     // Generate a temporary compliance password if one isn't provided by the UI
@@ -51,11 +51,11 @@ router.post('/register', async (req, res, next) => {
     if (sa_id) {
         await pool.query(
           `INSERT INTO usage_logs (user_id, action, duration_minutes) VALUES ((SELECT id FROM admin_users WHERE email = $1), $2, 0)`,
-          [email, `ONBOARDING: Biometric & SA ID (${sa_id}) received for zero-trust verification.`]
+          [email, `ONBOARDING: Biometric & service_number (${sa_id}) received for zero-trust verification.`]
         );
     }
 
-    res.json({ message: `Identity submitted successfully. Account is pending clearance.` });
+    res.json({ message: `(${service_number}) submitted successfully. Account is pending clearance.` });
   } catch (err) { next(err); }
 });
 
