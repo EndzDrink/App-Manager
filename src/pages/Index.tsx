@@ -192,7 +192,6 @@ const NotificationBell = ({ onNavigate }: { onNavigate: (tab: string) => void })
   }, [fetchAlerts]);
 
   const handleNotificationClick = async (alert: any) => {
-    // 1. Mark as read in the database
     try {
       const token = localStorage.getItem('appManagerToken');
       await fetch(`${API_URL}/api/notifications/${alert.id}/read`, {
@@ -204,23 +203,16 @@ const NotificationBell = ({ onNavigate }: { onNavigate: (tab: string) => void })
       console.error("Failed to mark as read");
     }
 
-    // 2. Close the dropdown menu
     setIsOpen(false);
-
-    // 3. PRECISION ROUTING: Send the user to the exact tab where the action card lives
     const title = alert.title.toLowerCase();
     
     if (title.includes('vetting approved')) {
-      // PMO needs to fund it. Take them directly to the Subscriptions tab.
       onNavigate('subscriptions'); 
     } else if (title.includes('architecture request') || title.includes('veto')) {
-      // EA needs to vet it, or a user needs to see their rejection.
-      onNavigate('catalog'); // *Note: Change this to 'ea-strategy' if that is where your vetting UI is!
+      onNavigate('catalog'); 
     } else if (title.includes('provisioning') || title.includes('rollout')) {
-      // Networks and Apps teams have their queues on the main dashboard.
       onNavigate('dashboard');
     } else if (title.includes('go-live')) {
-      // Department Heads check their active software in Subscriptions.
       onNavigate('subscriptions');
     } else {
       onNavigate('dashboard');
@@ -319,7 +311,12 @@ const Index = () => {
   const [systems, setSystems] = useState<System[]>([]);
   const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
   const [connectors, setConnectors] = useState<Connector[]>([]);
+  
+  // NEW: Added User Pagination Tracking
   const [users, setUsers] = useState<User[]>([]);
+  const [currentUserPage, setCurrentUserPage] = useState<number>(1);
+  const [paginationInfo, setPaginationInfo] = useState({ totalPages: 1, totalItems: 0 });
+
   const [duplications, setDuplications] = useState<unknown[]>([]);
   const [deptSpend, setDeptSpend] = useState<unknown[]>([]);
   const [trends, setTrends] = useState<unknown>(null);
@@ -491,9 +488,20 @@ const Index = () => {
     if (res.ok) setConnectors(await res.json());
   }, []);
 
-  const fetchUsers = useCallback(async () => {
-    const res = await fetchWithAuth('/api/users');
-    if (res.ok) setUsers(await res.json());
+  // NEW: Updated to handle pagination query strings and extract nested data
+  const fetchUsers = useCallback(async (page: number = 1) => {
+    const res = await fetchWithAuth(`/api/users?page=${page}&limit=50`);
+    if (res.ok) {
+        const json = await res.json();
+        // If the backend returns the new pagination format, extract data. Otherwise gracefully fallback.
+        if (json.data && json.pagination) {
+            setUsers(json.data);
+            setPaginationInfo(json.pagination);
+            setCurrentUserPage(json.pagination.currentPage);
+        } else {
+            setUsers(json); // Fallback for pre-paginated data
+        }
+    }
   }, []);
 
   const fetchTrends = useCallback(async () => {
@@ -523,7 +531,7 @@ const Index = () => {
         fetchRecommendations(),
         fetchSettings(),
         fetchConnectors(),
-        fetchUsers(),
+        fetchUsers(currentUserPage), // Maintain current page on refresh
         fetchAuditData(role),
         fetchTrends()
       ]);
@@ -532,7 +540,7 @@ const Index = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [token, role, fetchMonthlyCost, fetchSubscriptions, fetchSystems, fetchRecommendations, fetchSettings, fetchConnectors, fetchUsers, fetchAuditData, fetchTrends]);
+  }, [token, role, currentUserPage, fetchMonthlyCost, fetchSubscriptions, fetchSystems, fetchRecommendations, fetchSettings, fetchConnectors, fetchUsers, fetchAuditData, fetchTrends]);
 
   const handleUpdateBudget = useCallback(async (nb: number) => {
     await fetchWithAuth('/api/settings', { method: 'PUT', body: JSON.stringify({ monthly_budget: nb }) });
@@ -809,10 +817,15 @@ const Index = () => {
 
       case "users":
         return USER_ROLES.includes(role) ? (
+          // NEW: UsersTab now receives the full pagination payload
           <UsersTab
             users={users}
             onRefresh={refreshAllData}
             investigationQuery={biSystemFilter !== "All" ? biSystemFilter : undefined}
+            currentPage={currentUserPage}
+            totalPages={paginationInfo.totalPages}
+            totalUsers={paginationInfo.totalItems}
+            onPageChange={(newPage) => fetchUsers(newPage)}
           />
         ) : <UnauthorizedView />;
 
