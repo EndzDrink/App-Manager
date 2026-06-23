@@ -216,14 +216,14 @@ export const Register = () => {
 
             {/* STEP 2: SA ID NUMBER */}
             <div className="space-y-2">
-              <label className="text-xs font-black text-gray-500 uppercase tracking-widest">2. National Identity</label>
+              <label className="text-xs font-black text-gray-500 uppercase tracking-widest">2. Service Number</label>
               <div className="relative">
                 <Fingerprint className="absolute left-3 top-3 h-5 w-5 text-gray-400" />
                 <input 
                   type="text" 
                   maxLength={13}
                   className="w-full pl-10 pr-4 py-2.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 transition-all font-bold text-gray-900 outline-none tracking-widest"
-                  placeholder="13-Digit SA ID Number"
+                  placeholder="Service Number"
                   value={saId}
                   onChange={(e) => setSaId(e.target.value.replace(/\D/g, ''))} // Only allow numbers
                   required
