@@ -124,7 +124,7 @@ export const Register = () => {
           <ShieldCheck className="h-20 w-20 text-green-500 mx-auto mb-6" />
           <h2 className="text-2xl font-black text-gray-900 mb-2">Identity Locked & Submitted</h2>
           <p className="text-sm text-gray-600 mb-6">
-            Your biometric profile and SA ID have been securely encrypted and submitted to Enterprise Architecture. Your account is currently in a <strong>Pending Clearance</strong> state.
+            Your biometric profile and service number have been securely encrypted and submitted to Enterprise Architecture. Your account is currently in a <strong>Pending Clearance</strong> state.
           </p>
           <Button onClick={() => window.location.href = '/login'} className="w-full bg-blue-800 hover:bg-blue-900 text-white font-bold">
             Return to Login
@@ -158,7 +158,7 @@ export const Register = () => {
               <div>
                 <h4 className="text-sm font-bold text-blue-900">POPIA Compliance Notice</h4>
                 <p className="text-xs text-blue-800/80 mt-1">
-                  Your South African ID number and biometric data are heavily encrypted in transit and at rest. This data is used strictly for internal municipal audit tracking and non-repudiation of IT expenditure.
+                  Your service number and biometric data are heavily encrypted in transit and at rest. This data is used strictly for internal municipal audit tracking and non-repudiation of IT expenditure.
                 </p>
               </div>
             </Card>
@@ -284,7 +284,7 @@ export const Register = () => {
                   />
                 </div>
                 <div className="text-xs text-gray-500 font-medium leading-relaxed group-hover:text-gray-700 transition-colors">
-                  I explicitly consent to the collection and processing of my SA ID and biometric data in accordance with the Protection of Personal Information Act (POPIA) for the sole purpose of secure enterprise authentication.
+                  I explicitly consent to the collection and processing of service number and biometric data in accordance with the Protection of Personal Information Act (POPIA) for the sole purpose of secure enterprise authentication.
                 </div>
               </label>
             </div>
