@@ -6,12 +6,13 @@ import {
   Database, AlertCircle, ChevronDown, RefreshCw, Server, 
   CheckCircle2, LayoutDashboard, AlertTriangle, ChevronLeft, ChevronRight
 } from "lucide-react";
+// NEW: Import the cache invalidation engine
+import { useQueryClient } from '@tanstack/react-query';
 
 interface UsersTabProps {
   users: any[];
   onRefresh: () => Promise<void> | void;
   investigationQuery?: string; 
-  // NEW: Pagination Props
   currentPage?: number;
   totalPages?: number;
   totalUsers?: number;
@@ -27,6 +28,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({
   totalUsers = 0,
   onPageChange
 }) => {
+  const queryClient = useQueryClient(); 
   const [searchQuery, setSearchQuery] = useState(investigationQuery);
   const [expandedUser, setExpandedUser] = useState<number | null>(null);
   
@@ -40,7 +42,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({
     setSearchQuery(investigationQuery);
   }, [investigationQuery]);
 
-  // Fetch Enterprise Catalog to populate the dropdown for broken links
   useEffect(() => {
     const fetchSystems = async () => {
       try {
@@ -63,16 +64,22 @@ export const UsersTab: React.FC<UsersTabProps> = ({
     
     try {
       const token = localStorage.getItem('appManagerToken');
+      
+      // THE FIX: Strip out the 'SYS-' prefix before parsing into an integer
+      const cleanSystemId = parseInt(targetSystemId.toString().replace('SYS-', ''), 10);
+
       const res = await fetch(`${API_URL}/api/subscriptions/${subId}/assign`, {
         method: 'PUT',
         headers: { 
           'Content-Type': 'application/json', 
           'Authorization': `Bearer ${token}` 
         },
-        body: JSON.stringify({ system_id: parseInt(targetSystemId) })
+        body: JSON.stringify({ system_id: cleanSystemId })
       });
 
       if (res.ok) {
+        // Force the cache to pull the new linked data instantly
+        queryClient.invalidateQueries(); 
         if (onRefresh) await onRefresh();
       } else {
         console.error("Failed to reconcile broken link.");
@@ -84,7 +91,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({
     }
   };
 
-  // ARMORED FILTER LOGIC: Safely parses strings and handles nulls
+  // ARMORED FILTER LOGIC
   const filteredUsers = users.filter(user => {
     if (!searchQuery) return true;
     const query = searchQuery.toLowerCase();
@@ -107,7 +114,6 @@ export const UsersTab: React.FC<UsersTabProps> = ({
   });
 
   return (
-    // Locked viewport height for the native app feel (prevents window scrolling)
     <div className="animate-in fade-in duration-500 h-full flex flex-col pb-4">
       
       {/* HEADER SECTION */}
@@ -372,7 +378,7 @@ export const UsersTab: React.FC<UsersTabProps> = ({
           </div>
         )}
 
-        {/* NEW: PAGINATION FOOTER */}
+        {/* PAGINATION FOOTER */}
         {(totalPages > 1 || totalUsers > 0) && (
           <div className="p-4 border-t border-gray-200 bg-gray-50 flex items-center justify-between shrink-0">
             <p className="text-xs text-gray-500 font-medium">

@@ -10,7 +10,7 @@ const JWT_SECRET = process.env.JWT_SECRET || 'enterprise_super_secret_key_2026';
 // Strict Auth Rate Limiter: Prevent brute-force password attacks (Max 10 attempts)
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: 100,
   message: { error: "Security Lockout: Too many authentication attempts." }
 });
 

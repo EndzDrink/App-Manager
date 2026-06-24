@@ -6,6 +6,8 @@ import {
   CheckCircle2, Trash2, Building2, 
   ArrowRightLeft, UserX, Wallet, AlertTriangle, X, Loader2
 } from "lucide-react";
+// NEW: Import hook to force cache invalidation
+import { useQueryClient } from '@tanstack/react-query';
 
 interface SubscriptionsTabProps {
   subscriptions: any[];
@@ -22,6 +24,7 @@ interface DeptPool {
 }
 
 export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscriptions, onAddSubscription }) => {
+  const queryClient = useQueryClient(); // Access the cache engine
   const [isAdding, setIsAdding] = useState(false);
   const [isTransferring, setIsTransferring] = useState(false);
   const [isReconciling, setIsReconciling] = useState<number | null>(null);
@@ -51,7 +54,6 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
       if (sysRes.ok) setAvailableSystems(await sysRes.json());
       if (userRes.ok) {
         const json = await userRes.json();
-        // FIXED: Safely extract the array whether it's the new paginated format or the old array format
         setAvailableUsers(json.data ? json.data : json);
       }
     });
@@ -92,6 +94,8 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
       });
       if (res.ok) {
         setSuccessMsg("License procured successfully.");
+        // FORCE REFRESH: Force the cache to pull the new procurement
+        queryClient.invalidateQueries({ queryKey: ['subscriptions'] });
         setTimeout(() => {
           setIsAdding(false);
           setSuccessMsg('');
@@ -113,6 +117,8 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
     if(confirm("Revoke this license?")) {
       const token = localStorage.getItem('appManagerToken');
       await fetch(`${API_URL}/api/subscriptions/${id}`, { method: 'DELETE', headers: { 'Authorization': `Bearer ${token}` } });
+      // FORCE REFRESH: Remove revoked item from cache
+      queryClient.invalidateQueries({ queryKey: ['subscriptions'] });
       onAddSubscription();
     }
   }
@@ -128,6 +134,8 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
       });
       
       if (res.ok) {
+        // FORCE REFRESH: Ensure updated billing owner appears
+        queryClient.invalidateQueries({ queryKey: ['subscriptions'] });
         setTransferModal(null);
         onAddSubscription();
       }
@@ -164,6 +172,8 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
         });
 
         if (res.ok) {
+            // FORCE REFRESH: This kills the orphaned status immediately
+            queryClient.invalidateQueries({ queryKey: ['subscriptions'] });
             onAddSubscription(); 
         } else {
             console.error("Failed to assign license");
@@ -175,7 +185,6 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
       }
   }
 
-  // ROBUST COST PARSER: Safely handles nulls, strings, and missing price fields
   const getCost = (val: any) => {
     if (val === null || val === undefined) return 0;
     const parsed = parseFloat(String(val).replace(/,/g, ''));
@@ -190,7 +199,6 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
     const simulatedOwningDept = user.id === 0 ? 'Unknown' : (sub.owning_dept || user.department);
     const isCrossDepartment = user.id !== 0 && user.department !== simulatedOwningDept && user.department !== 'None';
     
-    // Check both monthly_cost and price columns
     const computedCost = getCost(sub.monthly_cost || sub.price);
 
     return { ...sub, user, isIdle, isUnassigned: user.id === 0, owningDept: simulatedOwningDept, isCrossDepartment, computedCost, mockDaysAgo: isIdle ? 35 : 0 };
@@ -222,7 +230,6 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
 
   return (
     <div className="animate-in fade-in duration-500 h-full flex flex-col pb-4 max-w-[1600px] mx-auto">
-      
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 pb-4 border-b border-gray-200 mb-6 shrink-0">
         <div>
           <h2 className="text-xl font-black text-blue-900 flex items-center tracking-tight">
@@ -388,7 +395,6 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
         </div>
       )}
 
-      {/* TABLE AREA */}
       <Card className="bg-white border border-gray-200 shadow-sm rounded-xl flex flex-col flex-1 min-h-0 overflow-hidden">
         <div className="bg-gray-50/50 px-6 py-4 border-b border-gray-100 flex justify-between items-center shrink-0">
           <span className="text-xs font-bold text-blue-900 uppercase tracking-wider">Enterprise License Directory</span>
@@ -539,7 +545,7 @@ export const SubscriptionsTab: React.FC<SubscriptionsTabProps> = ({ subscription
                 </div>
                 <ArrowRightLeft className="h-5 w-5 text-sky-400 mx-2" />
                 <div className="text-center flex-1">
-                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-widest">New Owner</p>
+                  <p className="text-[10px] font-bold text-gray-500 uppercase tracking-wider">New Owner</p>
                   <p className="text-xs font-bold text-green-600 mt-1">{transferModal.user.department}</p>
                 </div>
               </div>
