@@ -1,5 +1,10 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import type { ElementType } from "react";
+// NEW: Import TanStack Query for Enterprise State Orchestration
+import { QueryClient, QueryClientProvider, useQuery, useQueryClient } from '@tanstack/react-query';
+// NEW: Import the WebSocket Client
+import { io } from 'socket.io-client';
+
 import { CIODashboard } from "@/components/CIODashboard";
 import { StaffDashboard } from "@/components/StaffDashboard";
 import { DepartmentDashboard } from "@/components/DepartmentDashboard";
@@ -22,13 +27,23 @@ import { Button } from "@/components/ui/button";
 import {
   CreditCard, Lightbulb, Lock, Server, Filter, X,
   Monitor, ShieldAlert, Shield, LogOut, Download, RefreshCw,
-  LayoutDashboard, Users, ShieldCheck, Settings, Menu, Archive, FileText, Fingerprint, SlidersHorizontal, Bell, CheckCircle2
+  LayoutDashboard, Users, ShieldCheck, Settings, Menu, Archive, FileText, Fingerprint, SlidersHorizontal, Bell, CheckCircle2, Activity
 } from "lucide-react";
 
 // ------------------------------------------------------------------
-// 1. ENV & CONSTANTS
+// 1. ENV, CONSTANTS & QUERY CLIENT SETUP
 // ------------------------------------------------------------------
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      refetchOnWindowFocus: true, 
+      staleTime: 5 * 60 * 1000,   
+      retry: 1,                   
+    },
+  },
+});
 
 const MUNICIPAL_UNITS = [
   "Information Management Unit (IMU)",
@@ -272,9 +287,11 @@ const NotificationBell = ({ onNavigate }: { onNavigate: (tab: string) => void })
 };
 
 // ------------------------------------------------------------------
-// 6. MAIN COMPONENT
+// 6. MAIN COMPONENT (SEAMDashboard)
 // ------------------------------------------------------------------
-const Index = () => {
+const SEAMDashboard = () => {
+  const localClient = useQueryClient(); 
+
   const [token, setToken] = useState<string | null>(() => localStorage.getItem('appManagerToken'));
   const [role, setRole] = useState<AppRole>(() => parseRole(localStorage.getItem('appManagerRole')));
   const [userDepartmentId, setUserDepartmentId] = useState<number | null>(() => {
@@ -288,6 +305,9 @@ const Index = () => {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
   const [isArchiveOpen, setIsArchiveOpen] = useState(false);
   const [isCustomizeOpen, setIsCustomizeOpen] = useState(false);
+  
+  // State for real-time WebSocket toast alerts
+  const [liveToast, setLiveToast] = useState<{title: string, message: string, type: string} | null>(null);
 
   // --- Dashboard Customization State ---
   const [visibleWidgets, setVisibleWidgets] = useState<string[]>(() => {
@@ -299,7 +319,6 @@ const Index = () => {
     }
   });
 
-  // --- Data State ---
   const [savedReports, setSavedReports] = useState<SavedReport[]>(() => {
     try {
       return JSON.parse(localStorage.getItem('ea_saved_reports') || '[]');
@@ -308,24 +327,7 @@ const Index = () => {
     }
   });
 
-  const [systems, setSystems] = useState<System[]>([]);
-  const [subscriptions, setSubscriptions] = useState<Subscription[]>([]);
-  const [connectors, setConnectors] = useState<Connector[]>([]);
-  
-  // NEW: Added User Pagination Tracking
-  const [users, setUsers] = useState<User[]>([]);
   const [currentUserPage, setCurrentUserPage] = useState<number>(1);
-  const [paginationInfo, setPaginationInfo] = useState({ totalPages: 1, totalItems: 0 });
-
-  const [duplications, setDuplications] = useState<unknown[]>([]);
-  const [deptSpend, setDeptSpend] = useState<unknown[]>([]);
-  const [trends, setTrends] = useState<unknown>(null);
-  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
-  const [monthlyCost, setMonthlyCost] = useState<number>(0);
-  const [budget, setBudget] = useState<number>(150000);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // --- Drill-down State ---
   const [selectedDeptId, setSelectedDeptId] = useState<number | null>(null);
   const [deptDetails, setDeptDetails] = useState<unknown>(null);
 
@@ -335,27 +337,142 @@ const Index = () => {
   const [biDeptFilter, setBiDeptFilter] = useState<string>("All");
 
   // ----------------------------------------------------------------
-  // 7. MEMOIZED DERIVATIONS
+  // 7. WEBSOCKETS TELEMETRY HOOK (The Real-Time Engine)
+  // ----------------------------------------------------------------
+  useEffect(() => {
+    if (!token) return;
+
+    // Connect to the Live Highway
+    const socket = io(API_URL);
+
+    socket.on('connect', () => {
+      console.log('📡 Connected to SEAM Live Telemetry Network');
+    });
+
+    // Invisible Background Sync: Triggered whenever DB changes
+    socket.on('invalidate_cache', () => {
+      console.log('🔄 Data change detected. Silently syncing dashboard...');
+      localClient.invalidateQueries();
+    });
+
+    // High-Priority Alert: Triggered on Escalations/Approvals
+    socket.on('live_alert', (payload) => {
+      setLiveToast(payload);
+      // Auto-dismiss the alert after 6 seconds
+      setTimeout(() => setLiveToast(null), 6000);
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [token, localClient]);
+
+  // ----------------------------------------------------------------
+  // 8. REACT QUERY FETCHING LOGIC
+  // ----------------------------------------------------------------
+  const fetchWithAuth = async (endpoint: string, options: RequestInit = {}) => {
+    const currentToken = localStorage.getItem('appManagerToken');
+    const headers = {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${currentToken}`,
+      ...options.headers,
+    };
+    const res = await fetch(`${API_URL}${endpoint}`, { ...options, headers });
+    if (!res.ok) throw new Error(`API Error: ${endpoint}`);
+    return res.json();
+  };
+
+  const { data: systems = [], isFetching: loadingSystems } = useQuery({
+    queryKey: ['systems'],
+    queryFn: () => fetchWithAuth('/api/systems'),
+    enabled: !!token
+  });
+
+  const { data: subscriptions = [], isFetching: loadingSubs } = useQuery({
+    queryKey: ['subscriptions'],
+    queryFn: () => fetchWithAuth('/api/subscriptions'),
+    enabled: !!token
+  });
+
+  const { data: recommendations = [] } = useQuery({
+    queryKey: ['recommendations'],
+    queryFn: () => fetchWithAuth('/api/recommendations'),
+    enabled: !!token
+  });
+
+  const { data: monthlyCostObj } = useQuery({
+    queryKey: ['monthlyCost'],
+    queryFn: () => fetchWithAuth('/api/metrics/monthly-cost'),
+    enabled: !!token
+  });
+  const monthlyCost = monthlyCostObj?.total || 0;
+
+  const { data: budgetObj } = useQuery({
+    queryKey: ['budget'],
+    queryFn: () => fetchWithAuth('/api/settings'),
+    enabled: !!token
+  });
+  const budget = parseFloat(budgetObj?.monthly_budget || 150000);
+
+  const { data: connectors = [] } = useQuery({
+    queryKey: ['connectors'],
+    queryFn: () => fetchWithAuth('/api/connectors'),
+    enabled: !!token && role === 'SuperAdmin'
+  });
+
+  const { data: trends } = useQuery({
+    queryKey: ['trends'],
+    queryFn: () => fetchWithAuth('/api/metrics/trends'),
+    enabled: !!token
+  });
+
+  const { data: deptSpend = [] } = useQuery({
+    queryKey: ['deptSpend'],
+    queryFn: () => fetchWithAuth('/api/metrics/departmental-spend'),
+    enabled: !!token && ['SuperAdmin', 'EA', 'DepartmentHead'].includes(role)
+  });
+
+  const { data: duplications = [] } = useQuery({
+    queryKey: ['duplications'],
+    queryFn: () => fetchWithAuth('/api/audit/duplication'),
+    enabled: !!token && ['SuperAdmin', 'EA'].includes(role)
+  });
+
+  const { data: usersData, isFetching: loadingUsers } = useQuery({
+    queryKey: ['users', currentUserPage],
+    queryFn: async () => {
+      const json = await fetchWithAuth(`/api/users?page=${currentUserPage}&limit=50`);
+      return json.data && json.pagination ? json : { data: json, pagination: { totalPages: 1, totalItems: json.length } };
+    },
+    enabled: !!token && USER_ROLES.includes(role)
+  });
+  const users = usersData?.data || [];
+  const paginationInfo = usersData?.pagination || { totalPages: 1, totalItems: 0 };
+
+  const isLoading = loadingSystems || loadingSubs || loadingUsers;
+
+  // ----------------------------------------------------------------
+  // 9. MEMOIZED DERIVATIONS
   // ----------------------------------------------------------------
   const visibleNavItems = useMemo(() => NAV_ITEMS.filter(item => item.roles.includes(role)), [role]);
 
   const allSystemNames = useMemo(
-    () => Array.from(new Set(systems.map(s => s.name).filter(Boolean))).sort() as string[],
+    () => Array.from(new Set(systems.map((s: any) => s.name).filter(Boolean))).sort() as string[],
     [systems]
   );
 
   const allDeptNames = useMemo(
-    () => Array.from(new Set(users.map(u => u.department).filter((d): d is string => !!d && d !== 'Unassigned'))).sort(),
+    () => Array.from(new Set(users.map((u: any) => u.department).filter((d): d is string => !!d && d !== 'Unassigned'))).sort(),
     [users]
   );
 
   const availableSystems = useMemo(() => {
     if (biUnitFilter === "All" && biDeptFilter === "All") return allSystemNames;
     return allSystemNames.filter(sys =>
-      users.some(u => {
+      users.some((u: any) => {
         const matchUnit = biUnitFilter === "All" || getUnitForDept(u.department) === biUnitFilter;
         const matchDept = biDeptFilter === "All" || u.department === biDeptFilter;
-        const hasSys = u.assigned_systems?.some(s => s.name === sys);
+        const hasSys = u.assigned_systems?.some((s: any) => s.name === sys);
         return matchUnit && matchDept && hasSys;
       })
     );
@@ -363,8 +480,8 @@ const Index = () => {
 
   const availableUnits = useMemo(() => {
     return MUNICIPAL_UNITS.filter(unit =>
-      users.some(u => {
-        const matchSys = biSystemFilter === "All" || u.assigned_systems?.some(s => s.name === biSystemFilter);
+      users.some((u: any) => {
+        const matchSys = biSystemFilter === "All" || u.assigned_systems?.some((s: any) => s.name === biSystemFilter);
         const matchDept = biDeptFilter === "All" || u.department === biDeptFilter;
         const isUnit = getUnitForDept(u.department) === unit;
         return matchSys && matchDept && isUnit;
@@ -374,8 +491,8 @@ const Index = () => {
 
   const availableDepts = useMemo(() => {
     return allDeptNames.filter(dept =>
-      users.some(u => {
-        const matchSys = biSystemFilter === "All" || u.assigned_systems?.some(s => s.name === biSystemFilter);
+      users.some((u: any) => {
+        const matchSys = biSystemFilter === "All" || u.assigned_systems?.some((s: any) => s.name === biSystemFilter);
         const matchUnit = biUnitFilter === "All" || getUnitForDept(u.department) === biUnitFilter;
         const isDept = u.department === dept;
         return matchSys && matchUnit && isDept;
@@ -384,12 +501,12 @@ const Index = () => {
   }, [allDeptNames, users, biSystemFilter, biUnitFilter]);
 
   const filteredSubscriptions = useMemo(() => {
-    return subscriptions.filter(sub => {
+    return subscriptions.filter((sub: any) => {
       if (role === 'DepartmentHead' && sub.department_id !== userDepartmentId) return false;
       if (biSystemFilter !== "All" && sub.name !== biSystemFilter) return false;
       if (biUnitFilter !== "All" || biDeptFilter !== "All") {
-        const userForSub = users.find(u =>
-          u.assigned_systems?.some(s => s.name === sub.name && s.price === sub.price)
+        const userForSub = users.find((u: any) =>
+          u.assigned_systems?.some((s: any) => s.name === sub.name && s.price === sub.price)
         );
         if (userForSub) {
           if (biUnitFilter !== "All" && getUnitForDept(userForSub.department) !== biUnitFilter) return false;
@@ -401,12 +518,12 @@ const Index = () => {
   }, [subscriptions, role, userDepartmentId, biSystemFilter, biUnitFilter, biDeptFilter, users]);
 
   const filteredMonthlyCost = useMemo(
-    () => filteredSubscriptions.reduce((sum, sub) => sum + parseFloat(String(sub.price || 0)), 0),
+    () => filteredSubscriptions.reduce((sum: number, sub: any) => sum + parseFloat(String(sub.price || 0)), 0),
     [filteredSubscriptions]
   );
 
   const filteredRecommendations = useMemo(
-    () => (biSystemFilter === "All" ? recommendations : recommendations.filter(rec => rec.title.includes(biSystemFilter))),
+    () => (biSystemFilter === "All" ? recommendations : recommendations.filter((rec: any) => rec.title.includes(biSystemFilter))),
     [recommendations, biSystemFilter]
   );
 
@@ -419,7 +536,7 @@ const Index = () => {
   }, [percentUsed]);
 
   // ----------------------------------------------------------------
-  // 8. HANDLERS
+  // 10. HANDLERS
   // ----------------------------------------------------------------
   const handleLogout = useCallback(() => {
     localStorage.removeItem('appManagerToken');
@@ -428,7 +545,8 @@ const Index = () => {
     setToken(null);
     setRole('StandardUser');
     setUserDepartmentId(null);
-  }, []);
+    localClient.clear(); 
+  }, [localClient]);
 
   const handleLoginSuccess = useCallback((newToken: string, newRole: string, deptId?: number) => {
     localStorage.setItem('appManagerToken', newToken);
@@ -438,138 +556,44 @@ const Index = () => {
     setToken(newToken);
     setRole(parseRole(newRole));
     if (deptId) setUserDepartmentId(deptId);
-
     setActiveTab('dashboard'); 
   }, []);
 
-  const fetchWithAuth = async (endpoint: string, options: RequestInit = {}) => {
-    const currentToken = localStorage.getItem('appManagerToken');
-    const headers = {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${currentToken}`,
-      ...options.headers,
-    };
-    return fetch(`${API_URL}${endpoint}`, { ...options, headers });
-  };
-
-  const fetchMonthlyCost = useCallback(async () => {
-    const res = await fetchWithAuth('/api/metrics/monthly-cost');
-    if (res.ok) {
-      const d = await res.json();
-      setMonthlyCost(d.total);
-    }
-  }, []);
-
-  const fetchSubscriptions = useCallback(async () => {
-    const res = await fetchWithAuth('/api/subscriptions');
-    if (res.ok) setSubscriptions(await res.json());
-  }, []);
-
-  const fetchSystems = useCallback(async () => {
-    const res = await fetchWithAuth('/api/systems');
-    if (res.ok) setSystems(await res.json());
-  }, []);
-
-  const fetchRecommendations = useCallback(async () => {
-    const res = await fetchWithAuth('/api/recommendations');
-    if (res.ok) setRecommendations(await res.json());
-  }, []);
-
-  const fetchSettings = useCallback(async () => {
-    const res = await fetchWithAuth('/api/settings');
-    if (res.ok) {
-      const d = await res.json();
-      setBudget(parseFloat(d.monthly_budget));
-    }
-  }, []);
-
-  const fetchConnectors = useCallback(async () => {
-    const res = await fetchWithAuth('/api/connectors');
-    if (res.ok) setConnectors(await res.json());
-  }, []);
-
-  // NEW: Updated to handle pagination query strings and extract nested data
-  const fetchUsers = useCallback(async (page: number = 1) => {
-    const res = await fetchWithAuth(`/api/users?page=${page}&limit=50`);
-    if (res.ok) {
-        const json = await res.json();
-        // If the backend returns the new pagination format, extract data. Otherwise gracefully fallback.
-        if (json.data && json.pagination) {
-            setUsers(json.data);
-            setPaginationInfo(json.pagination);
-            setCurrentUserPage(json.pagination.currentPage);
-        } else {
-            setUsers(json); // Fallback for pre-paginated data
-        }
-    }
-  }, []);
-
-  const fetchTrends = useCallback(async () => {
-    const res = await fetchWithAuth('/api/metrics/trends');
-    if (res.ok) setTrends(await res.json());
-  }, []);
-
-  const fetchAuditData = useCallback(async (currentRole: AppRole) => {
-    if (['SuperAdmin', 'EA', 'DepartmentHead'].includes(currentRole)) {
-      const deptRes = await fetchWithAuth('/api/metrics/departmental-spend');
-      if (deptRes.ok) setDeptSpend(await deptRes.json());
-    }
-    if (['SuperAdmin', 'EA'].includes(currentRole)) {
-      const dupRes = await fetchWithAuth('/api/audit/duplication');
-      if (dupRes.ok) setDuplications(await dupRes.json());
-    }
-  }, []);
-
-  const refreshAllData = useCallback(async () => {
-    if (!token) return;
-    setIsLoading(true);
-    try {
-      await Promise.all([
-        fetchMonthlyCost(),
-        fetchSubscriptions(),
-        fetchSystems(),
-        fetchRecommendations(),
-        fetchSettings(),
-        fetchConnectors(),
-        fetchUsers(currentUserPage), // Maintain current page on refresh
-        fetchAuditData(role),
-        fetchTrends()
-      ]);
-    } catch (error) {
-      console.error("Failed to sync engine:", error);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [token, role, currentUserPage, fetchMonthlyCost, fetchSubscriptions, fetchSystems, fetchRecommendations, fetchSettings, fetchConnectors, fetchUsers, fetchAuditData, fetchTrends]);
+  const refreshAllData = useCallback(() => {
+    if (token) localClient.invalidateQueries();
+  }, [token, localClient]);
 
   const handleUpdateBudget = useCallback(async (nb: number) => {
     await fetchWithAuth('/api/settings', { method: 'PUT', body: JSON.stringify({ monthly_budget: nb }) });
-    setBudget(nb);
-  }, []);
+    localClient.invalidateQueries({ queryKey: ['budget'] });
+  }, [localClient]);
 
   const handleReclaim = useCallback(async (id: number) => {
     if (role === 'StandardUser') return;
-    const res = await fetchWithAuth(`/api/subscriptions/${id}`, { method: 'DELETE' });
-    if (res.ok) refreshAllData();
-  }, [role, refreshAllData]);
+    const currentToken = localStorage.getItem('appManagerToken');
+    await fetch(`${API_URL}/api/subscriptions/${id}`, { 
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${currentToken}` }
+    });
+  }, [role, localClient]);
 
   const handleDepartmentClick = useCallback(async (id: number) => {
-    const res = await fetchWithAuth(`/api/departments/${id}/details`);
-    if (res.ok) {
-      const details = await res.json();
+    try {
+      const details = await fetchWithAuth(`/api/departments/${id}/details`);
       setDeptDetails(details);
       setSelectedDeptId(id);
+    } catch (e) {
+      console.error("Failed to load dept details");
     }
   }, []);
 
   const handleAddConnector = useCallback(async (connectorData: unknown) => {
     try {
       await fetchWithAuth('/api/connectors', { method: 'POST', body: JSON.stringify(connectorData) });
-      refreshAllData();
     } catch (err) {
       console.error("Failed to save connector:", err);
     }
-  }, [refreshAllData]);
+  }, [localClient]);
 
   const handleSaveReportToArchive = useCallback((filename: string, content: string) => {
     const newReport: SavedReport = {
@@ -608,9 +632,6 @@ const Index = () => {
     });
   };
 
-  // ----------------------------------------------------------------
-  // 9. EXPORT
-  // ----------------------------------------------------------------
   const handleExportData = useCallback(() => {
     const dateStamp = new Date().toISOString().split('T')[0];
     let csvContent = "";
@@ -618,7 +639,7 @@ const Index = () => {
 
     if (activeTab === 'systems') {
       const headers = ['System ID', 'System Name', 'Category', 'Date Added', 'Deployed Departments'];
-      const rows = systems.map(app => [
+      const rows = systems.map((app: any) => [
         app.id,
         app.name,
         app.category,
@@ -629,7 +650,7 @@ const Index = () => {
       filename = `eThekwini_IT_Catalog_${dateStamp}.csv`;
     } else {
       const headers = ['System Name', 'Category', 'Monthly Cost (ZAR)', 'Assigned Project', 'Status'];
-      const rows = filteredSubscriptions.map(sub => [
+      const rows = filteredSubscriptions.map((sub: any) => [
         sub.name,
         sub.category,
         sub.price,
@@ -654,16 +675,16 @@ const Index = () => {
   }, [activeTab, systems, filteredSubscriptions, handleSaveReportToArchive]);
 
   // ----------------------------------------------------------------
-  // 10. FILTER EVENT HANDLERS
+  // 11. FILTER EVENT HANDLERS
   // ----------------------------------------------------------------
   const handleSystemChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     const val = e.target.value;
     setBiSystemFilter(val);
     if (val !== "All") {
-      if (biUnitFilter !== "All" && !users.some(u => getUnitForDept(u.department) === biUnitFilter && u.assigned_systems?.some(s => s.name === val))) {
+      if (biUnitFilter !== "All" && !users.some((u: any) => getUnitForDept(u.department) === biUnitFilter && u.assigned_systems?.some((s: any) => s.name === val))) {
         setBiUnitFilter("All");
       }
-      if (biDeptFilter !== "All" && !users.some(u => u.department === biDeptFilter && u.assigned_systems?.some(s => s.name === val))) {
+      if (biDeptFilter !== "All" && !users.some((u: any) => u.department === biDeptFilter && u.assigned_systems?.some((s: any) => s.name === val))) {
         setBiDeptFilter("All");
       }
     }
@@ -674,7 +695,7 @@ const Index = () => {
     setBiUnitFilter(val);
     if (val !== "All") {
       if (biDeptFilter !== "All" && getUnitForDept(biDeptFilter) !== val) setBiDeptFilter("All");
-      if (biSystemFilter !== "All" && !users.some(u => getUnitForDept(u.department) === val && u.assigned_systems?.some(s => s.name === biSystemFilter))) {
+      if (biSystemFilter !== "All" && !users.some((u: any) => getUnitForDept(u.department) === val && u.assigned_systems?.some((s: any) => s.name === biSystemFilter))) {
         setBiSystemFilter("All");
       }
     }
@@ -686,18 +707,11 @@ const Index = () => {
     if (val !== "All") {
       const parentUnit = getUnitForDept(val);
       if (biUnitFilter !== parentUnit) setBiUnitFilter(parentUnit);
-      if (biSystemFilter !== "All" && !users.some(u => u.department === val && u.assigned_systems?.some(s => s.name === biSystemFilter))) {
+      if (biSystemFilter !== "All" && !users.some((u: any) => u.department === val && u.assigned_systems?.some((s: any) => s.name === biSystemFilter))) {
         setBiSystemFilter("All");
       }
     }
   }, [biUnitFilter, biSystemFilter, users]);
-
-  // ----------------------------------------------------------------
-  // 11. EFFECTS
-  // ----------------------------------------------------------------
-  useEffect(() => {
-    if (token) refreshAllData();
-  }, [token, refreshAllData]);
 
   useEffect(() => {
     if (visibleNavItems.length > 0 && !visibleNavItems.find(item => item.id === activeTab)) {
@@ -817,7 +831,6 @@ const Index = () => {
 
       case "users":
         return USER_ROLES.includes(role) ? (
-          // NEW: UsersTab now receives the full pagination payload
           <UsersTab
             users={users}
             onRefresh={refreshAllData}
@@ -825,7 +838,7 @@ const Index = () => {
             currentPage={currentUserPage}
             totalPages={paginationInfo.totalPages}
             totalUsers={paginationInfo.totalItems}
-            onPageChange={(newPage) => fetchUsers(newPage)}
+            onPageChange={setCurrentUserPage}
           />
         ) : <UnauthorizedView />;
 
@@ -849,7 +862,7 @@ const Index = () => {
         onChange={handleSystemChange}
       >
         <option value="All">All Systems</option>
-        {availableSystems.map(name => <option key={name} value={name}>{name}</option>)}
+        {availableSystems.map((name: string) => <option key={name} value={name}>{name}</option>)}
       </select>
 
       <select
@@ -858,7 +871,7 @@ const Index = () => {
         onChange={handleUnitChange}
       >
         <option value="All">All Units</option>
-        {availableUnits.map(unit => <option key={unit} value={unit}>{unit}</option>)}
+        {availableUnits.map((unit: string) => <option key={unit} value={unit}>{unit}</option>)}
       </select>
 
       <select
@@ -867,7 +880,7 @@ const Index = () => {
         onChange={handleDeptChange}
       >
         <option value="All">All Departments</option>
-        {availableDepts.map(name => <option key={name} value={name}>{name}</option>)}
+        {availableDepts.map((name: string) => <option key={name} value={name}>{name}</option>)}
       </select>
     </div>
   );
@@ -1021,14 +1034,6 @@ const Index = () => {
               
             <NotificationBell onNavigate={setActiveTab} />
 
-              {activeTab === 'dashboard' && (
-                <Button
-                  onClick={() => setIsLiveMode(true)}
-                  className="bg-yellow-400 hover:bg-yellow-500 text-blue-900 font-bold shadow-sm h-9 px-4 mr-2"
-                >
-                  <Monitor className="h-4 w-4 mr-2" /> Live Dashboard
-                </Button>
-              )}
               {activeTab === 'dashboard' && ['SuperAdmin', 'DepartmentHead', 'EA'].includes(role) && (
                 <Button
                   onClick={() => setIsCustomizeOpen(true)}
@@ -1072,6 +1077,35 @@ const Index = () => {
         <Footer />
 
       </main>
+
+      {/* LIVE TELEMETRY FLASH UI */}
+      {liveToast && (
+        <div className="fixed bottom-6 right-6 z-[200] bg-white border-l-4 shadow-2xl rounded-lg p-4 animate-in slide-in-from-bottom-8 min-w-[300px] border-blue-600">
+          <div className="flex items-start justify-between space-x-3">
+            <div className="flex items-start space-x-3">
+              <div className="mt-0.5">
+                {liveToast.type === 'warning' ? (
+                  <div className="relative">
+                    <ShieldAlert className="h-5 w-5 text-red-500" />
+                    <span className="absolute top-0 right-0 h-2 w-2 rounded-full bg-red-500 animate-ping"></span>
+                  </div>
+                ) : liveToast.type === 'success' ? (
+                  <CheckCircle2 className="h-5 w-5 text-green-500" />
+                ) : (
+                  <Activity className="h-5 w-5 text-blue-500 animate-pulse" />
+                )}
+              </div>
+              <div>
+                <h4 className="text-sm font-bold text-gray-900 tracking-tight">{liveToast.title}</h4>
+                <p className="text-xs text-gray-600 mt-0.5 leading-relaxed">{liveToast.message}</p>
+              </div>
+            </div>
+            <button onClick={() => setLiveToast(null)} className="text-gray-400 hover:text-gray-600 shrink-0">
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Customize Dashboard Modal */}
       {isCustomizeOpen && (
@@ -1176,4 +1210,11 @@ const Index = () => {
   );
 };
 
-export default Index;
+// Wrap the component in the QueryClientProvider
+export default function Index() {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <SEAMDashboard />
+    </QueryClientProvider>
+  );
+}

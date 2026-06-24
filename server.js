@@ -3,7 +3,13 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
+import RedisStore from 'rate-limit-redis';
+import { createClient } from 'redis';
 import { z } from 'zod';
+
+// --- NEW: WEBSOCKET IMPORTS ---
+import { createServer } from 'http';
+import { Server } from 'socket.io';
 
 // --- MICRO-ARCHITECTURE IMPORTS ---
 import { pool, initializeSystems } from './config/db.js';
@@ -13,14 +19,48 @@ import authRoutes from './routes/auth.js';
 const app = express();
 const port = process.env.PORT || 3000;
 
+// --- NEW: HTTP & WEBSOCKET SERVER SETUP ---
+const httpServer = createServer(app);
+const io = new Server(httpServer, {
+  cors: { origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }
+});
+
+// Telemetry Connection Monitor
+io.on('connection', (socket) => {
+  console.log(`📡 Live Telemetry Node Connected: ${socket.id}`);
+  socket.on('disconnect', () => console.log(`📡 Node Disconnected: ${socket.id}`));
+});
+
+// Inject the WebSockets emitter into all API routes
+app.use((req, res, next) => {
+  req.io = io;
+  next();
+});
+
+// --- REDIS CACHE INITIALIZATION ---
+const redisClient = createClient({
+  url: process.env.REDIS_URL || 'redis://localhost:6379'
+});
+
+redisClient.on('error', (err) => console.error('🚨 Redis Client Error:', err));
+redisClient.on('ready', () => console.log('📦 Redis Cache connected successfully.'));
+
+await redisClient.connect();
+
 // --- SECURITY, HEADERS & RATE LIMITING ---
 app.use(helmet()); 
 app.use(cors({ origin: '*', methods: ['GET', 'POST', 'PUT', 'DELETE'] }));
 app.use(express.json());
 
+// --- DISTRIBUTED RATE LIMITER ---
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, 
-  max: 200,
+  max: 200, 
+  standardHeaders: true,
+  legacyHeaders: false,
+  store: new RedisStore({
+    sendCommand: (...args) => redisClient.sendCommand(args),
+  }),
   message: { error: "Network traffic threshold exceeded. Please try again later." }
 });
 app.use('/api/', apiLimiter);
@@ -116,7 +156,6 @@ app.get('/api/metrics/usage/category', authenticateToken, async (req, res, next)
 });
 
 // --- 7. CATALOG, IDENTITY & SUBSCRIPTIONS ---
-
 const systemSchema = z.object({
   name: z.string().min(1, "System name is required"),
   vendor: z.string().optional(),
@@ -170,6 +209,8 @@ app.post('/api/systems', authenticateToken, async (req, res, next) => {
         validatedData.monthly_cost_per_seat || 0.00
       ]
     );
+    // NEW: Broadcast catalog update
+    req.io.emit('invalidate_cache');
     res.json({ success: true, system: result.rows[0] });
   } catch (err) { 
     if (err instanceof z.ZodError) {
@@ -179,14 +220,12 @@ app.post('/api/systems', authenticateToken, async (req, res, next) => {
   }
 });
 
-// --- UPDATED: GET /api/users now supports LIMIT and OFFSET Pagination ---
 app.get('/api/users', authenticateToken, async (req, res, next) => {
   try {
     const page = parseInt(req.query.page) || 1;
     const limit = parseInt(req.query.limit) || 50; 
     const offset = (page - 1) * limit;
 
-    // Base conditions
     let condition = '1=1';
     let params = [];
     let paramIndex = 1;
@@ -197,12 +236,10 @@ app.get('/api/users', authenticateToken, async (req, res, next) => {
       paramIndex++;
     }
 
-    // Step 1: Get the absolute total count of users matching the condition
     const countQuery = `SELECT COUNT(*) as total FROM personnel p WHERE ${condition}`;
     const countResult = await pool.query(countQuery, params);
     const totalUsers = parseInt(countResult.rows[0].total || 0);
 
-    // Step 2: Fetch the paginated data
     let query = `
       SELECT 
         p.id, 
@@ -229,11 +266,9 @@ app.get('/api/users', authenticateToken, async (req, res, next) => {
       LIMIT $${paramIndex} OFFSET $${paramIndex + 1}
     `;
     
-    // Add pagination params to the end
     const dataParams = [...params, limit, offset];
     const r = await pool.query(query, dataParams);
     
-    // Step 3: Return data wrapped in pagination metadata
     res.json({
       data: r.rows,
       pagination: {
@@ -247,9 +282,7 @@ app.get('/api/users', authenticateToken, async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// --- NEW: ONBOARDING ENDPOINT ---
 app.post('/api/users', authenticateToken, async (req, res, next) => {
-  // Only SuperAdmin or EA can onboard new staff
   if (!['SuperAdmin', 'EA'].includes(req.user.role)) {
     return res.status(403).json({ error: "Access Denied: Onboarding restricted." });
   }
@@ -261,6 +294,7 @@ app.post('/api/users', authenticateToken, async (req, res, next) => {
       `INSERT INTO admin_users (email, password_hash, role, department_id) VALUES ($1, $2, $3, $4)`,
       [email, hashedPassword, role, parseInt(department_id)]
     );
+    req.io.emit('invalidate_cache');
     res.json({ success: true, message: "User successfully onboarded." });
   } catch (err) { next(err); }
 });
@@ -350,15 +384,19 @@ app.post('/api/subscriptions', authenticateToken, async (req, res, next) => {
       [operatorId, system_id, `PROCUREMENT: New software license allocation for system ID ${system_id} explicitly provisioned and assigned.`]
     );
 
-    // --- NEW: TRIGGER CHAIN REACTION TO NETWORKS TEAM ---
     await pool.query(
       `INSERT INTO notifications (target_role, title, message, alert_type) VALUES ($1, $2, $3, $4)`,
       ['NetworksHead', 'Infrastructure Provisioning Required', `System ID ${system_id} has been funded. Pending firewall and network security sign-off.`, 'warning']
     );
 
     await pool.query('COMMIT');
+
+    // NEW: Broadcast financial change
+    req.io.emit('invalidate_cache');
+    req.io.emit('live_alert', { title: 'License Procured', message: `New subscriptions mapped to budget.`, type: 'info' });
+
     res.json({ 
-      success: true, triggerTelemetryUpdate: true,
+      success: true,
       message: fulfilledUsers.length > 0 ? `Procured and auto-fulfilled ${fulfilledUsers.length} pending staff requests.` : `License procured and added to department pool.` 
     });
 
@@ -390,7 +428,9 @@ app.delete('/api/subscriptions/:id', authenticateToken, async (req, res, next) =
       `INSERT INTO usage_logs (user_id, action, duration_minutes) VALUES ($1, $2, 0)`,
       [operatorId, `RECONCILIATION: Subscription entry ID ${id} explicitly revoked to reclaim allocated budget allocations.`]
     );
-    res.json({ success: true, triggerTelemetryUpdate: true });
+    
+    req.io.emit('invalidate_cache');
+    res.json({ success: true });
   } catch (err) { next(err); }
 });
 
@@ -405,7 +445,8 @@ app.put('/api/subscriptions/:id/transfer', authenticateToken, async (req, res, n
     const newDeptId = deptRes.rows[0].id;
 
     await pool.query('UPDATE active_subscriptions SET owning_department_id = $1 WHERE id = $2', [newDeptId, id]);
-    res.json({ success: true, triggerTelemetryUpdate: true, message: "License successfully transferred." });
+    req.io.emit('invalidate_cache');
+    res.json({ success: true, message: "License successfully transferred." });
   } catch (err) { next(err); }
 });
 
@@ -433,7 +474,7 @@ app.put('/api/subscriptions/:id/assign', authenticateToken, async (req, res, nex
         department_id ? parseInt(department_id) : null, 
         assigned_user_id ? parseInt(assigned_user_id) : null, 
         associated_project || null, 
-        system_id ? parseInt(system_id) : null, // Added system_id patching
+        system_id ? parseInt(system_id) : null, 
         id
       ]
     );
@@ -444,7 +485,8 @@ app.put('/api/subscriptions/:id/assign', authenticateToken, async (req, res, nex
     );
 
     await pool.query('COMMIT');
-    res.json({ success: true, triggerTelemetryUpdate: true, message: "Asset successfully assigned.", subscription: result.rows[0] });
+    req.io.emit('invalidate_cache');
+    res.json({ success: true, message: "Asset successfully assigned.", subscription: result.rows[0] });
   } catch (err) {
     await pool.query('ROLLBACK');
     next(err);
@@ -505,7 +547,9 @@ app.put('/api/settings', authenticateToken, async (req, res, next) => {
       `INSERT INTO usage_logs (user_id, action, duration_minutes) VALUES ($1, $2, 0)`,
       [operatorId, `GOVERNANCE: Global monthly budget threshold limit explicitly updated to ZAR ${cleanBudget.toLocaleString()}.`]
     );
-    res.json({ success: true, triggerTelemetryUpdate: true });
+    
+    req.io.emit('invalidate_cache');
+    res.json({ success: true });
   } catch (err) { next(err); }
 });
 
@@ -557,6 +601,7 @@ app.post('/api/connectors', authenticateToken, async (req, res, next) => {
   try {
     if (!provider_name || !api_endpoint) return res.status(400).json({ error: "Missing required parameters." });
     await pool.query('INSERT INTO data_connectors (provider_name, api_endpoint, api_key) VALUES ($1, $2, $3)', [provider_name, api_endpoint, api_key]);
+    req.io.emit('invalidate_cache');
     res.json({ success: true });
   } catch (err) { next(err); }
 });
@@ -578,6 +623,7 @@ app.post('/api/connectors/:id/sync', authenticateToken, async (req, res, next) =
       [operatorId, `INTEGRATION: Manual sync execution triggered for interface: ${connector.provider_name}.`]
     );
 
+    req.io.emit('invalidate_cache');
     res.json({ success: true, message: "Interface pinged successfully." });
   } catch (err) { 
     next(err); 
@@ -591,10 +637,8 @@ app.get('/api/notifications', authenticateToken, async (req, res, next) => {
     let query = `SELECT * FROM notifications WHERE is_read = FALSE`;
     let params = [];
 
-    // If the user is NOT a SuperAdmin, strictly filter by their specific role, dept, or ID
     if (role !== 'SuperAdmin') {
       query += ` AND (target_role = $1 OR target_dept_id = $2 OR target_user_id = $3)`;
-      // Force undefined values to NULL to prevent pg driver crash
       params = [role || 'StandardUser', deptId || null, id || null];
     }
     
@@ -603,7 +647,6 @@ app.get('/api/notifications', authenticateToken, async (req, res, next) => {
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) { 
-    console.error("NOTIFICATION DB ERROR:", err.message);
     next(err); 
   }
 });
@@ -633,13 +676,22 @@ app.post('/api/pmo/escalate', authenticateToken, async (req, res, next) => {
       `INSERT INTO usage_logs (user_id, app_id, action, duration_minutes) VALUES ($1, $2, $3, 0)`,
       [userId, null, `ESCALATION: Project ${project_id} - ${reason || 'Funding Bottleneck'}`]
     );
-    res.json({ success: true, triggerTelemetryUpdate: true, message: "Escalated to CIO successfully." });
+    
+    // NEW: Broadcast the escalation instantly to the CIO dashboard
+    req.io.emit('live_alert', { 
+      title: 'Critical Escalation', 
+      message: `Project ${project_id} has been escalated to the CIO for review.`, 
+      type: 'warning' 
+    });
+    req.io.emit('invalidate_cache');
+    
+    res.json({ success: true, message: "Escalated to CIO successfully." });
   } catch (err) { next(err); }
 });
-// --- NEW: CIO EXECUTIVE RESOLUTION ROUTE ---
+
 app.put('/api/pmo/resolve/:log_id', authenticateToken, async (req, res, next) => {
   const { log_id } = req.params;
-  const { directive, notes } = req.body; // e.g., 'Approved', 'Vetoed'
+  const { directive, notes } = req.body; 
   const operatorId = req.user.id;
 
   if (req.user.role !== 'SuperAdmin' && req.user.role !== 'CIO') {
@@ -649,7 +701,6 @@ app.put('/api/pmo/resolve/:log_id', authenticateToken, async (req, res, next) =>
   try {
     await pool.query('BEGIN');
 
-    // 1. Mark the original escalation as resolved in the ledger
     await pool.query(
       `UPDATE usage_logs 
        SET action = REPLACE(action, 'ESCALATION:', 'RESOLVED [${directive}]:') 
@@ -657,19 +708,26 @@ app.put('/api/pmo/resolve/:log_id', authenticateToken, async (req, res, next) =>
       [log_id]
     );
 
-    // 2. Log the CIO's explicit justification for the Auditor-General
     await pool.query(
       `INSERT INTO usage_logs (user_id, action, duration_minutes) VALUES ($1, $2, 0)`,
       [operatorId, `EXECUTIVE DIRECTIVE: Escalation ID ${log_id} resolved with status [${directive}]. Justification: ${notes}`]
     );
 
-    // 3. Fire the notification back down to the PMO
     await pool.query(
       `INSERT INTO notifications (target_role, title, message, alert_type) VALUES ($1, $2, $3, $4)`,
       ['PMOLead', 'Executive Directive Issued', `The CIO has issued a [${directive}] directive on your escalated project. Notes: ${notes}`, directive === 'Approved' ? 'success' : 'warning']
     );
 
     await pool.query('COMMIT');
+
+    // NEW: Broadcast the CIO's resolution live to PMO
+    req.io.emit('live_alert', { 
+      title: 'Executive Directive Issued', 
+      message: `The CIO issued a [${directive}] directive.`, 
+      type: directive === 'Approved' ? 'success' : 'warning' 
+    });
+    req.io.emit('invalidate_cache');
+
     res.json({ success: true, message: "Executive directive executed and PMO notified." });
   } catch (err) {
     await pool.query('ROLLBACK');
@@ -688,13 +746,13 @@ app.post('/api/requests', authenticateToken, async (req, res, next) => {
       [userId, system_id, 'Pending', 'pending', 'pending', category || 'Uncategorized', JSON.stringify(required_capabilities || []), estimated_users || 1, estimated_cost_annual || 0.00, justification || '', exception_justification || '', JSON.stringify(aligned_domains || [])]
     );
 
-    // TRIGGER AUTOMATED NOTIFICATION
     await pool.query(
       `INSERT INTO notifications (target_role, title, message, alert_type) 
        VALUES ($1, $2, $3, $4)`,
       ['EA', 'New Architecture Request', `A new license request (REQ-${result.rows[0].id}) has entered the pipeline and requires vetting.`, 'info']
     );
 
+    req.io.emit('invalidate_cache');
     res.json({ success: true, message: "Request queued for CRM vetting.", id: `REQ-${result.rows[0].id}` });
   } catch (err) { next(err); }
 });
@@ -706,6 +764,7 @@ app.put('/api/requests/:id/escalate', authenticateToken, async (req, res, next) 
 
   try {
     await pool.query(`UPDATE license_requests SET crm_status = 'Escalated to EA', ea_status = 'Awaiting EA Vetting' WHERE id = $1`, [cleanId]);
+    req.io.emit('invalidate_cache');
     res.json({ success: true, message: "Request successfully escalated." });
   } catch (err) { next(err); }
 });
@@ -765,25 +824,22 @@ app.put('/api/requests/:id/vetting', authenticateToken, async (req, res, next) =
     if (updateFields.length === 0) return res.status(400).json({ error: "No valid operational update elements provided." });
     params.push(cleanId);
     
-    // 1. Update the database record
     await pool.query(`UPDATE license_requests SET ${updateFields.join(', ')} WHERE id = $${paramIndex}`, params);
 
-    // 2. TRIGGER AUTOMATED CHAIN REACTION NOTIFICATIONS
     if (ea_status === 'Approved') {
-      // Notify PMO that it's their turn
       await pool.query(
         `INSERT INTO notifications (target_role, title, message, alert_type) VALUES ($1, $2, $3, $4)`,
         ['PMOLead', 'EA Vetting Approved', `Architecture approved Request REQ-${cleanId}. It is ready for PMO pipeline scoping and funding allocation.`, 'info']
       );
     } else if (ea_status === 'Vetoed') {
-      // Notify the Department Head that their request was blocked
       await pool.query(
         `INSERT INTO notifications (target_role, title, message, alert_type) VALUES ($1, $2, $3, $4)`,
         ['DepartmentHead', 'Architecture Veto', `Request REQ-${cleanId} was vetoed by Enterprise Architecture due to non-compliance.`, 'warning']
       );
     }
 
-    res.json({ success: true, triggerTelemetryUpdate: true, message: `Request updated successfully.` });
+    req.io.emit('invalidate_cache');
+    res.json({ success: true, message: `Request updated successfully.` });
   } catch (err) { 
     next(err); 
   }
@@ -811,13 +867,13 @@ app.put('/api/provisioning/network/:id', authenticateToken, async (req, res, nex
       [operatorId, `SECURITY CLEARANCE: Subscription ID ${id} network perimeter secured and whitelisted.`]
     );
 
-    // Trigger chain reaction to Apps
     await pool.query(
       `INSERT INTO notifications (target_role, title, message, alert_type) VALUES ($1, $2, $3, $4)`,
       ['ApplicationsHead', 'Integration Rollout Pending', `Subscription ID ${id} network secured. Awaiting Entra ID SSO and DB integration.`, 'info']
     );
 
     await pool.query('COMMIT');
+    req.io.emit('invalidate_cache');
     res.json({ success: true, message: "Network perimeter secured. Integration team notified." });
   } catch (err) {
     await pool.query('ROLLBACK');
@@ -849,7 +905,6 @@ app.put('/api/provisioning/integration/:id', authenticateToken, async (req, res,
           [operatorId, `INTEGRATION COMPLETE: Subscription ID ${id} is federated and Live.`]
         );
 
-        // Notify Department Head that their software is ready
         await pool.query(
           `INSERT INTO notifications (target_dept_id, target_role, title, message, alert_type) VALUES ($1, $2, $3, $4, $5)`,
           [deptId, 'DepartmentHead', 'Software Go-Live', `System ID ${subRes.rows[0].system_id} has passed UAT and is officially Live for your department.`, 'success']
@@ -857,6 +912,11 @@ app.put('/api/provisioning/integration/:id', authenticateToken, async (req, res,
     }
 
     await pool.query('COMMIT');
+    
+    // NEW: Broadcast the Go-Live event across the organization
+    req.io.emit('live_alert', { title: 'System Go-Live', message: `A new software deployment has successfully entered production.`, type: 'success' });
+    req.io.emit('invalidate_cache');
+    
     res.json({ success: true, message: "System integration completed and set to Live." });
   } catch (err) {
     await pool.query('ROLLBACK');
@@ -875,4 +935,5 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "An internal system error occurred. Action logged for administrator review." });
 });
 
-app.listen(port, () => console.log(`🚀 Municipal Engine fully operational on port ${port}`));
+// --- NEW: HTTP SERVER LISTENER ---
+httpServer.listen(port, () => console.log(`🚀 Municipal Engine fully operational on port ${port} with Live Telemetry Enabled`));
