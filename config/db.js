@@ -6,15 +6,24 @@ const { Pool } = pg;
 
 export const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-  max: 20, 
-  idleTimeoutMillis: 30000
+  // Added verify-full to satisfy the new libpq/pg requirements
+  ssl: { 
+    rejectUnauthorized: false,
+    sslmode: 'verify-full' 
+  },
+  // Increased timeout to allow Neon instances to wake up from hibernation
+  connectionTimeoutMillis: 15000, 
+  idleTimeoutMillis: 30000,
+  max: 20 
 });
 
 pool.on('error', (err) => console.error('⚠️ Database Connection Error:', err.message));
 
 export const initializeSystems = async () => {
   try {
+    // Test the connection immediately on startup
+    await pool.query('SELECT 1');
+    
     await pool.query(`
       CREATE TABLE IF NOT EXISTS admin_users (
         id SERIAL PRIMARY KEY, 
@@ -86,7 +95,6 @@ export const initializeSystems = async () => {
       );
     `);
 
-    // --- NEW: ENSURE THE DEPLOYMENT TRACKING COLUMNS EXIST ---
     const subColumns = [
       { name: 'network_status', type: "VARCHAR(50) DEFAULT 'Pending'" },
       { name: 'integration_status', type: "VARCHAR(50) DEFAULT 'Pending'" }
@@ -187,7 +195,7 @@ export const initializeSystems = async () => {
     await pool.query(`INSERT INTO admin_users (email, password_hash, role) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING`, ['admin@organization.com', hashedPassword, 'SuperAdmin']);
     await pool.query(`INSERT INTO settings (id, monthly_budget) VALUES (1, 150000.00) ON CONFLICT (id) DO NOTHING`);
 
-    console.log("✅ Database Schema Verified & Hardened with SEAM Constraints (Deployment Pipeline Active).");
+    console.log("✅ Database Schema Verified & Hardened.");
   } catch (err) { 
     console.error("❌ DB Initialization failed:", err.message); 
   }
